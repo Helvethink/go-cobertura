@@ -1043,6 +1043,83 @@ func TestConvertStrictModePassesWhenNoSkips(t *testing.T) {
 	require.Contains(t, buf.String(), "coverage")
 }
 
+func TestConvertSurfacesPackageLoadDiagnostics(t *testing.T) {
+	tests := []struct {
+		name             string
+		goMod            string
+		sourcePath       string
+		source           string
+		profile          string
+		packageName      string
+		wantWarning      string
+		wantCoverage     bool
+		wantStrictDetail string
+	}{
+		{
+			name:       "unresolved import keeps usable profile",
+			goMod:      "module example.com/diagnostic\n\ngo 1.25.0\n",
+			sourcePath: "diagnostic.go",
+			source: `package diagnostic
+
+import _ "example.com/missing"
+
+func Covered() {}
+`,
+			profile:          "example.com/diagnostic/diagnostic.go:5.1,5.18 1 1\n",
+			packageName:      "example.com/diagnostic",
+			wantWarning:      "no required module provides package example.com/missing",
+			wantCoverage:     true,
+			wantStrictDetail: `package "example.com/diagnostic"`,
+		},
+		{
+			name: "incomplete private dependency",
+			goMod: `module example.com/application
+
+go 1.25.0
+
+require private.example.com/team/dependency v0.0.0
+
+replace private.example.com/team/dependency => ./missing-private-dependency
+`,
+			profile:          "private.example.com/team/dependency/dependency.go:1.1,1.2 1 1\n",
+			packageName:      "private.example.com/team/dependency",
+			wantWarning:      "replacement directory ./missing-private-dependency does not exist",
+			wantCoverage:     false,
+			wantStrictDetail: `package "private.example.com/team/dependency"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(test.goMod), 0o600))
+			if test.sourcePath != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, test.sourcePath), []byte(test.source), 0o600))
+			}
+			input := "mode: set\n" + test.profile
+
+			var output bytes.Buffer
+			var warnings bytes.Buffer
+			err := convertWithWarnings(strings.NewReader(input), &output, &warnings, &Ignore{}, dir)
+			require.NoError(t, err)
+			require.Contains(t, warnings.String(), test.wantWarning)
+			require.Contains(t, warnings.String(), test.packageName)
+			if test.wantCoverage {
+				require.Contains(t, output.String(), "diagnostic.go")
+			} else {
+				require.NotContains(t, output.String(), "dependency.go")
+				require.Contains(t, warnings.String(), "skipping profile")
+			}
+
+			output.Reset()
+			err = convertStrict(strings.NewReader(input), &output, &Ignore{}, dir)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), test.wantStrictDetail)
+			require.Contains(t, err.Error(), test.wantWarning)
+		})
+	}
+}
+
 // TestIgnoreNonCodeLines verifies that non code lines are/are not covered, as expected.
 func TestIgnoreNonCodeLines(t *testing.T) {
 	tests := []struct {
