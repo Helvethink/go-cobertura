@@ -1,4 +1,4 @@
-# Go-coubertura
+# Go Cobertura
 
 ## Forked from t-yuki and boumenot
 
@@ -50,7 +50,12 @@ from [go tool cover](https://code.google.com/p/go.tools/) output.
 Installation
 ------------
 
-Just type the following to install the program and its dependencies:
+Until the first Helvethink release is tagged, install the maintained `main`
+branch:
+
+    $ go install github.com/Helvethink/go-cobertura@main
+
+After that release is available, prefer the latest tagged version:
 
     $ go install github.com/Helvethink/go-cobertura@latest
 
@@ -59,7 +64,7 @@ Usage
 
 `go-cobertura` reads from the standard input:
 
-    $ go test -coverprofile=coverage.txt -covermode count github.com/gorilla/mux
+    $ go test -coverprofile=coverage.txt -covermode=count ./...
     $ go-cobertura < coverage.txt > coverage.xml
 
 Note that you should run this from the directory which holds your `go.mod` file.
