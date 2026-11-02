@@ -149,9 +149,9 @@
     </package>
     <package name="github.com/junegunn/fzf/src" line-rate="0.20383343" branch-rate="0" complexity="0">
       <classes>
-        <class name="-" filename="src/actiontype_string.go" line-rate="NaN" branch-rate="0" complexity="0">
+        <class name="-" filename="src/actiontype_string.go" line-rate="0" branch-rate="0" complexity="0">
           <methods>
-            <method name="_" signature="" line-rate="NaN" branch-rate="0" complexity="0">
+            <method name="_" signature="" line-rate="0" branch-rate="0" complexity="0">
               <lines></lines>
             </method>
           </methods>
@@ -24051,9 +24051,9 @@
             <line number="63" hits="0"></line>
           </lines>
         </class>
-        <class name="-" filename="src/tui/eventtype_string.go" line-rate="NaN" branch-rate="0" complexity="0">
+        <class name="-" filename="src/tui/eventtype_string.go" line-rate="0" branch-rate="0" complexity="0">
           <methods>
-            <method name="_" signature="" line-rate="NaN" branch-rate="0" complexity="0">
+            <method name="_" signature="" line-rate="0" branch-rate="0" complexity="0">
               <lines></lines>
             </method>
           </methods>
