@@ -1,9 +1,9 @@
 mode: set
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:5.37,6.16 1 1
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:6.16,8.2 1 0
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:17.42,18.20 1 1
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:18.20,20.3 1 1
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:21.2,21.11 1 1
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:27.46,28.20 1 1
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:28.20,30.3 1 1
-github.com/boumenot/gocover-cobertura/testdata/func_varfunc.go:31.2,31.11 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:5.37,6.16 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:6.16,8.2 1 0
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:17.42,18.20 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:18.20,20.3 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:21.2,21.11 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:27.46,28.20 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:28.20,30.3 1 1
+github.com/Helvethink/go-cobertura/testdata/func_varfunc.go:31.2,31.11 1 1
