@@ -76,6 +76,8 @@ redirection.  Use piping instead:
 
 In `cmd.exe`, `<` works but may cause encoding issues with non-ASCII file
 paths.  The piping approach above avoids this problem on both shells.
+Cobertura package names and filenames are always emitted with forward slashes,
+including when the input profile uses Windows path separators.
 
 ### Flags
 
