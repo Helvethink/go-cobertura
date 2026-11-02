@@ -1,3 +1,5 @@
+# Go-coubertura
+
 ## Forked from t-yuki and boumenot
 
 This is a **fork** of https://github.com/boumenot/gocover-cobertura.
@@ -44,22 +46,22 @@ Installation
 
 Just type the following to install the program and its dependencies:
 
-    $ go get github.com/boumenot/gocover-cobertura
+    $ go install github.com/Helvethink/go-cobertura@latest
 
 Usage
 -----
 
-`gocover-cobertura` reads from the standard input:
+`go-cobertura` reads from the standard input:
 
     $ go test -coverprofile=coverage.txt -covermode count github.com/gorilla/mux
-    $ gocover-cobertura < coverage.txt > coverage.xml
+    $ go-cobertura < coverage.txt > coverage.xml
 
 Note that you should run this from the directory which holds your `go.mod` file.
 
 **Windows note:** PowerShell does not support the `<` operator for stdin
 redirection.  Use piping instead:
 
-    Get-Content coverage.txt | gocover-cobertura > coverage.xml
+    Get-Content coverage.txt | go-cobertura > coverage.xml
 
 In `cmd.exe`, `<` works but may cause encoding issues with non-ASCII file
 paths.  The piping approach above avoids this problem on both shells.
@@ -77,11 +79,11 @@ Some flags can be passed (each flag should only be used once):
 
   ignore directories matching `PATTERN` regular expression. Full
   directory names are matched, as
-  `github.com/boumenot/gocover-cobertura` (and so `github.com/boumenot`
+  `github.com/Helvethink/go-cobertura` (and so `github.com/Helvethink`
   and `github.com`), examples of use:
   ```
   # A specific directory
-  -ignore-dirs '^github\.com/boumenot/gocover-cobertura/testdata$'
+  -ignore-dirs '^github\.com/Helvethink/go-cobertura/testdata$'
   # All directories autogen and any of their subdirs
   -ignore-dirs '/autogen$'
   ```
@@ -89,11 +91,11 @@ Some flags can be passed (each flag should only be used once):
 - `-ignore-files PATTERN`
 
   ignore files matching `PATTERN` regular expression. Full file names
-  are matched, as `github.com/boumenot/gocover-cobertura/profile.go`,
+  are matched, as `github.com/Helvethink/go-cobertura/profile.go`,
   examples of use:
   ```
   # A specific file
-  -ignore-files '^github\.com/boumenot/gocover-cobertura/profile\.go$'
+  -ignore-files '^github\.com/Helvethink/go-cobertura/profile\.go$'
   # All files ending with _gen.go
   -ignore-files '_gen\.go$'
   # All files in a directory autogen (or any of its subdirs)
@@ -115,11 +117,11 @@ Some flags can be passed (each flag should only be used once):
 - `-path DIR`
 
   set the project directory for package resolution.  By default,
-  `gocover-cobertura` resolves packages relative to the current working
+  `go-cobertura` resolves packages relative to the current working
   directory.  Use this flag when running from a different directory than
   the module root, for example in monorepos with nested modules:
 
-      gocover-cobertura -path /repo/services/api < coverage.txt > coverage.xml
+      go-cobertura -path /repo/services/api < coverage.txt > coverage.xml
 
 - `-strict`
 
@@ -128,12 +130,12 @@ Some flags can be passed (each flag should only be used once):
   on stderr but the tool exits successfully.  Use this flag in CI
   pipelines to catch silent data loss:
 
-      gocover-cobertura -strict < coverage.txt > coverage.xml
+      go-cobertura -strict < coverage.txt > coverage.xml
 
 ### Build tags
 
 If your tests use [build tags](https://pkg.go.dev/cmd/go#hdr-Build_constraints),
-you must pass the same tags when running `gocover-cobertura`.  The tool uses
+you must pass the same tags when running `go-cobertura`.  The tool uses
 [`packages.Load`](https://pkg.go.dev/golang.org/x/tools/go/packages#Load) to
 resolve source files, and it needs matching tags to find the right files.
 
@@ -142,18 +144,18 @@ Pass tags via the
 variable:
 
     # Single tag
-    GOFLAGS="-tags=integration" gocover-cobertura < coverage.txt > coverage.xml
+    GOFLAGS="-tags=integration" go-cobertura < coverage.txt > coverage.xml
 
     # Multiple tags
-    GOFLAGS="-tags=integration,e2e" gocover-cobertura < coverage.txt > coverage.xml
+    GOFLAGS="-tags=integration,e2e" go-cobertura < coverage.txt > coverage.xml
 
 On Windows (PowerShell):
 
-    $env:GOFLAGS="-tags=integration"; gocover-cobertura < coverage.txt > coverage.xml
+    $env:GOFLAGS="-tags=integration"; go-cobertura < coverage.txt > coverage.xml
 
 **Why is this needed?**  When you run `go test -tags=integration -coverprofile=coverage.txt`,
 the coverage profile includes files that are only compiled with that tag (e.g. files
-with `//go:build integration`).  Without the matching tag, `gocover-cobertura` cannot
+with `//go:build integration`).  Without the matching tag, `go-cobertura` cannot
 locate those files and will skip them with a warning on stderr.
 
 Troubleshooting
@@ -161,7 +163,7 @@ Troubleshooting
 
 ### Warning: skipping profile — no package/module information available
 
-This warning means `gocover-cobertura` could not resolve a package from the
+This warning means `go-cobertura` could not resolve a package from the
 coverage profile.  Common causes:
 
 - **Missing build tags** — see [Build tags](#build-tags) above.
@@ -180,7 +182,7 @@ the converter is running on Linux).  These files are safely skipped.
 ### Branch coverage is always 0
 
 The Cobertura format supports branch coverage (`branch-rate`, `branch="true"`
-on lines), but `gocover-cobertura` always reports `branch-rate="0"`.
+on lines), but `go-cobertura` always reports `branch-rate="0"`.
 
 Go's [coverage instrumentation](https://go.dev/blog/cover) tracks which
 statement blocks were executed, not which branch paths were taken.  While
