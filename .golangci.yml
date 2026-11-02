@@ -1,38 +1,78 @@
-# https://github.com/golangci/golangci-lint/blob/master/.golangci.example.yml
-# https://golangci-lint.run/usage/configuration/
-run:
-  timeout: 30s
-
-  sort-results: true
+version: "2"
 
 linters:
-  fast: false
-  presets:
-    - bugs
-    - complexity
-    - unused
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - cyclop
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - exhaustive
+    - funlen
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - gocognit
+    - gocyclo
+    - gosec
+    - gosmopolitan
+    - loggercheck
+    - maintidx
+    - makezero
     - misspell
+    - musttag
+    - nestif
+    - nilerr
+    - nilnesserr
+    - noctx
+    - protogetter
+    - reassign
+    - recvcheck
+    - rowserrcheck
+    - spancheck
+    - sqlclosecheck
+    - testifylint
+    - unparam
+    - zerologlint
+  settings:
+    cyclop:
+      max-complexity: 20 # TODO: update to 10
+    funlen:
+      lines: 75 # TODO: update to 60
+      statements: 45 # TODO: update to 40
+    gocognit:
+      min-complexity: 31 # TODO: update to 20
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Exclude complexity and duplication checks from test files.
+      - path: _test\.go
+        linters:
+          - dupl
+          - funlen
+          - gochecknoglobals
+          - goconst
+          - gocyclo
+          - gosec
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 
-linters-settings:
-  gocognit:
-    min-complexity: 31 # TODO: update to 20
-  cyclop:
-    max-complexity: 20 # TODO: update to 10
-  funlen:
-    statements: 45     # TODO: update to 40
-    lines: 75          # TODO: update to 60
-  misspell:
-    locale: US
-
-issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files.
-    - path: _test\.go
-      linters:
-        - dupl
-        - funlen
-        - gochecknoglobals
-        - goconst
-        - gocyclo
-        - gosec
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
