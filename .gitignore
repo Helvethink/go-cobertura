@@ -1,7 +1,7 @@
 *~
 .idea
-gocover-cobertura
-gocover-cobertura.exe
+go-cobertura
+go-cobertura.exe
 
 # Cloned source trees for regression tests (auto-downloaded, not checked in)
 testdata/regression/**/src/
