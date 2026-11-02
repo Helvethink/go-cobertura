@@ -119,16 +119,22 @@ func convertInternal(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...stri
 		return skipped, err
 	}
 
-	_, _ = fmt.Fprint(out, xml.Header)
-	_, _ = fmt.Fprintln(out, coberturaDTDDecl)
+	if _, err := fmt.Fprint(out, xml.Header); err != nil {
+		return skipped, fmt.Errorf("writing xml header: %w", err)
+	}
+	if _, err := fmt.Fprintln(out, coberturaDTDDecl); err != nil {
+		return skipped, fmt.Errorf("writing cobertura dtd: %w", err)
+	}
 
 	encoder := xml.NewEncoder(out)
 	encoder.Indent("", "  ")
 	if err := encoder.Encode(coverage); err != nil {
-		return skipped, err
+		return skipped, fmt.Errorf("encoding coverage xml: %w", err)
 	}
 
-	_, _ = fmt.Fprintln(out)
+	if _, err := fmt.Fprintln(out); err != nil {
+		return skipped, fmt.Errorf("writing trailing newline: %w", err)
+	}
 	return skipped, nil
 }
 
