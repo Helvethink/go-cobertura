@@ -50,6 +50,8 @@ from [go tool cover](https://code.google.com/p/go.tools/) output.
 Installation
 ------------
 
+Go 1.27 or newer is required to build and install the project.
+
 Until the first Helvethink release is tagged, install the maintained `main`
 branch:
 

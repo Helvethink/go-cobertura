@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -16,33 +17,148 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-var SaveTestResults = false
+func TestMainOutput(t *testing.T) {
+	if os.Getenv("GO_COBERTURA_TEST_MAIN") == "1" {
+		os.Exit(run(nil, os.Stdin, os.Stdout, os.Stderr))
+	}
 
-func Test_Main(t *testing.T) {
-	fname := filepath.Join(os.TempDir(), "stdout")
-	temp, err := os.Create(fname)
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestMainOutput$")
+	cmd.Env = append(os.Environ(), "GO_COBERTURA_TEST_MAIN=1")
+	cmd.Stdin = strings.NewReader("mode: set")
+	output, err := cmd.Output()
 	require.NoError(t, err)
-	os.Stdout = temp
-	main()
-	outputBytes, err := os.ReadFile(fname)
+	require.Contains(t, string(output), xml.Header)
+	require.Contains(t, string(output), coberturaDTDDecl)
+}
+
+func TestRunDoesNotRetainOptions(t *testing.T) {
+	input, err := os.ReadFile("testdata/testdata_set.txt")
 	require.NoError(t, err)
 
-	outputString := string(outputBytes)
-	require.Contains(t, outputString, xml.Header)
-	require.Contains(t, outputString, coberturaDTDDecl)
+	var byFilesOutput bytes.Buffer
+	require.Zero(t, run(
+		[]string{"-by-files"},
+		bytes.NewReader(input),
+		&byFilesOutput,
+		io.Discard,
+	))
+	require.Contains(t, byFilesOutput.String(), `name="testdata.func1.go"`)
+
+	var defaultOutput bytes.Buffer
+	require.Zero(t, run(nil, bytes.NewReader(input), &defaultOutput, io.Discard))
+	require.Contains(t, defaultOutput.String(), `name="-"`)
+	require.NotContains(t, defaultOutput.String(), `name="testdata.func1.go"`)
+}
+
+func TestRunRejectsInvalidIgnorePattern(t *testing.T) {
+	var stderr bytes.Buffer
+
+	exitCode := run(
+		[]string{"-ignore-files", "["},
+		strings.NewReader("mode: set"),
+		io.Discard,
+		&stderr,
+	)
+
+	require.Equal(t, 1, exitCode)
+	require.Contains(t, stderr.String(), "Bad -ignore-files regexp")
+}
+
+func TestRunHelpSucceeds(t *testing.T) {
+	var stderr bytes.Buffer
+
+	exitCode := run([]string{"-help"}, strings.NewReader("mode: set"), io.Discard, &stderr)
+
+	require.Zero(t, exitCode)
+	require.Contains(t, stderr.String(), "Usage of go-cobertura")
+}
+
+func TestRunAcceptsEmptyInput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(nil, strings.NewReader(""), &stdout, &stderr)
+
+	require.Zero(t, exitCode)
+	require.Contains(t, stdout.String(), "<coverage")
+	require.Empty(t, stderr.String())
+}
+
+func TestRunRejectsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		input      string
+		wantStderr string
+	}{
+		{
+			name:       "unknown flag",
+			args:       []string{"-unknown"},
+			input:      "mode: set",
+			wantStderr: "flag provided but not defined",
+		},
+		{
+			name:       "malformed coverage",
+			input:      "invalid data",
+			wantStderr: "code coverage conversion failed: bad mode line",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			exitCode := run(test.args, strings.NewReader(test.input), &stdout, &stderr)
+
+			require.Equal(t, 1, exitCode)
+			require.Empty(t, stdout.String())
+			require.Contains(t, stderr.String(), test.wantStderr)
+		})
+	}
+}
+
+func TestRunReportsOutputWriterFailure(t *testing.T) {
+	stdout := &failOnceWriter{shouldFail: func([]byte) bool { return true }}
+	var stderr bytes.Buffer
+
+	exitCode := run(nil, strings.NewReader("mode: set"), stdout, &stderr)
+
+	require.Equal(t, 1, exitCode)
+	require.True(t, stdout.failed)
+	require.Contains(t, stderr.String(), "code coverage conversion failed: writing xml header")
+	require.Contains(t, stderr.String(), errTestWrite.Error())
 }
 
 func TestConvertParseProfilesError(t *testing.T) {
-	pipe2rd, pipe2wr := io.Pipe()
-	defer func() {
-		err := pipe2rd.Close()
-		require.NoError(t, err)
-		err = pipe2wr.Close()
-		require.NoError(t, err)
-	}()
-	err := convert(strings.NewReader("invalid data"), pipe2wr, &Ignore{})
+	var output bytes.Buffer
+	err := convert(strings.NewReader("invalid data"), &output, io.Discard, conversionOptions{})
 	require.Error(t, err)
 	require.Equal(t, "bad mode line: invalid data", err.Error())
+}
+
+func convertFixture(t *testing.T, filename string, ignore *Ignore) Coverage {
+	t.Helper()
+	return convertFixtureWithOptions(t, filename, conversionOptions{ignore: *ignore})
+}
+
+func convertFixtureWithOptions(t *testing.T, filename string, options conversionOptions) Coverage {
+	t.Helper()
+
+	data, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	return convertAndDecode(t, bytes.NewReader(data), options)
+}
+
+func convertAndDecode(t *testing.T, input io.Reader, options conversionOptions) Coverage {
+	t.Helper()
+
+	var output bytes.Buffer
+	require.NoError(t, convert(input, &output, io.Discard, options))
+
+	var coverage Coverage
+	require.NoError(t, xml.NewDecoder(&output).Decode(&coverage))
+	return coverage
 }
 
 var errTestWrite = errors.New("test write failure")
@@ -99,7 +215,7 @@ func TestConvertOutputError(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			writer := &failOnceWriter{shouldFail: test.shouldFail}
-			err := convert(strings.NewReader("mode: set"), writer, &Ignore{})
+			err := convert(strings.NewReader("mode: set"), writer, io.Discard, conversionOptions{})
 
 			require.True(t, writer.failed, "test writer did not reach the expected output stage")
 			require.ErrorIs(t, err, errTestWrite)
@@ -112,7 +228,7 @@ func TestConvertEmpty(t *testing.T) {
 	data := `mode: set`
 
 	var output bytes.Buffer
-	err := convert(strings.NewReader(data), &output, &Ignore{})
+	err := convert(strings.NewReader(data), &output, io.Discard, conversionOptions{})
 	require.NoError(t, err)
 	require.NotContains(t, output.String(), "NaN")
 	require.NotContains(t, output.String(), "Inf")
@@ -130,14 +246,14 @@ func TestConvertEmpty(t *testing.T) {
 func TestParseProfileNilPackages(t *testing.T) {
 	v := Coverage{}
 	profile := Profile{FileName: "does-not-exist"}
-	_, err := v.parseProfile(&profile, nil, &Ignore{})
+	_, err := v.parseProfile(&profile, nil, conversionOptions{})
 	require.NoError(t, err)
 }
 
 func TestParseProfileEmptyPackages(t *testing.T) {
 	v := Coverage{}
 	profile := Profile{FileName: "does-not-exist"}
-	_, err := v.parseProfile(&profile, &packages.Package{}, &Ignore{})
+	_, err := v.parseProfile(&profile, &packages.Package{}, conversionOptions{})
 	require.NoError(t, err)
 }
 
@@ -152,7 +268,7 @@ func TestParseProfileDoesNotExist(t *testing.T) {
 		},
 	}
 
-	_, err := v.parseProfile(&profile, &pkg, &Ignore{})
+	_, err := v.parseProfile(&profile, &pkg, conversionOptions{})
 	require.Error(t, err)
 
 	if !strings.Contains(err.Error(), "unable to determine file path") {
@@ -203,7 +319,7 @@ func TestParseProfileModulePaths(t *testing.T) {
 				},
 			}
 
-			skipped, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+			skipped, err := coverage.parseProfile(&profile, &pkg, conversionOptions{})
 			require.NoError(t, err)
 			require.False(t, skipped)
 			require.Len(t, coverage.Packages, 1)
@@ -243,7 +359,7 @@ func TestParseProfileRejectsMismatchedModulePath(t *testing.T) {
 	}
 
 	require.NotPanics(t, func() {
-		_, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+		_, err := coverage.parseProfile(&profile, &pkg, conversionOptions{})
 		require.ErrorContains(t, err, `profile "example.com/other/file.go" is outside module "example.com/project"`)
 	})
 }
@@ -253,7 +369,7 @@ func TestParseProfileRejectsEmptyModulePath(t *testing.T) {
 	profile := Profile{FileName: "example.com/project/file.go"}
 	pkg := packages.Package{Module: &packages.Module{}}
 
-	_, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+	_, err := coverage.parseProfile(&profile, &pkg, conversionOptions{})
 	require.ErrorContains(t, err, "module path is empty")
 }
 
@@ -288,7 +404,7 @@ func TestParseProfileLoadsBuildConstrainedFile(t *testing.T) {
 		},
 	}
 
-	skipped, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+	skipped, err := coverage.parseProfile(&profile, &pkg, conversionOptions{})
 	require.NoError(t, err)
 	require.False(t, skipped)
 	require.Len(t, coverage.Packages, 1)
@@ -305,14 +421,14 @@ func TestParseProfileRejectsPathTraversal(t *testing.T) {
 		},
 	}
 
-	_, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+	_, err := coverage.parseProfile(&profile, &pkg, conversionOptions{})
 	require.ErrorContains(t, err, `source path "../secret.go" is outside module directory`)
 }
 
 func TestParseProfileNotReadable(t *testing.T) {
 	v := Coverage{}
 	profile := Profile{FileName: os.DevNull}
-	_, err := v.parseProfile(&profile, nil, &Ignore{})
+	_, err := v.parseProfile(&profile, nil, conversionOptions{})
 	require.NoError(t, err)
 }
 
@@ -337,7 +453,7 @@ func TestParseProfilePermissionDenied(t *testing.T) {
 			Path: filepath.Dir(tempFile.Name()),
 		},
 	}
-	_, err = v.parseProfile(&profile, &pkg, &Ignore{})
+	_, err = v.parseProfile(&profile, &pkg, conversionOptions{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "permission denied")
 }
@@ -356,55 +472,17 @@ func TestConvertNilModule(t *testing.T) {
 	// Module path because standard library packages have no module info.
 	data := "mode: set\nfmt/print.go:1.1,1.1 1 1\n"
 
-	pipe2rd, pipe2wr := io.Pipe()
-	var convertErr error
-	go func() {
-		convertErr = convert(strings.NewReader(data), pipe2wr, &Ignore{})
-		pipe2wr.Close()
-	}()
-
-	// Drain the reader so the goroutine can complete.
-	_, _ = io.ReadAll(pipe2rd)
-
-	// The convert function must not panic. It may return an error (e.g.
-	// because the file doesn't exist on disk) but a nil-pointer
-	// dereference panic is the bug we are guarding against.
+	var output bytes.Buffer
 	require.NotPanics(t, func() {
-		// The goroutine already ran; this is here only as a safety assertion.
+		require.NoError(t, convert(strings.NewReader(data), &output, io.Discard, conversionOptions{}))
 	})
-	_ = convertErr // error is acceptable; panic is not
 }
 
 func TestConvertSetMode(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_set.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	var convwr io.Writer = pipe2wr
-	if SaveTestResults {
-		testwr, err := os.Create("testdata/testdata_set.xml")
-		if err != nil {
-			t.Fatal("Can't open output testdata.", err)
-		}
-		defer func() { err := testwr.Close(); require.NoError(t, err) }()
-		convwr = io.MultiWriter(convwr, testwr)
-	}
-
-	go func() {
-		err := convert(pipe1rd, convwr, &Ignore{
-			GeneratedFiles: true,
-			Files:          regexp.MustCompile(`[\\/]func[45]\.go$`),
-		})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_set.txt", &Ignore{
+		GeneratedFiles: true,
+		Files:          regexp.MustCompile(`[\\/]func[45]\.go$`),
+	})
 
 	require.Equal(t, "coverage", v.XMLName.Local)
 	require.Len(t, v.Sources, 1)
@@ -467,29 +545,13 @@ func TestConvertSetMode(t *testing.T) {
 // names to be derived from the file path (dot-separated) instead of
 // the receiver type name.
 func TestConvertByFilesMode(t *testing.T) {
-	// Set the global flag and restore after test.
-	byFiles = true
-	defer func() { byFiles = false }()
-
-	pipe1rd, err := os.Open("testdata/testdata_set.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{
+	v := convertFixtureWithOptions(t, "testdata/testdata_set.txt", conversionOptions{
+		byFiles: true,
+		ignore: Ignore{
 			GeneratedFiles: true,
 			Files:          regexp.MustCompile(`[\\/]func[45]\.go$`),
-		})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+		},
+	})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -518,22 +580,7 @@ func TestConvertByFilesMode(t *testing.T) {
 // TestConvertInitFunc verifies that init() functions are included in
 // coverage output. init() is a regular FuncDecl with no receiver.
 func TestConvertInitFunc(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_init.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_init.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -558,22 +605,7 @@ func TestConvertInitFunc(t *testing.T) {
 // closure is NOT visited separately — its lines are counted as part
 // of the parent function's line range.
 func TestConvertClosureArg(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_closure_arg.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_closure_arg.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -600,22 +632,7 @@ func TestConvertClosureArg(t *testing.T) {
 // derived from various receiver types: value receivers, pointer
 // receivers (star trimmed), and different type names.
 func TestConvertReceiverTypes(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_receivers.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_receivers.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -648,22 +665,7 @@ func TestConvertReceiverTypes(t *testing.T) {
 // multiple files within one package produces the correct class/method
 // structure with methods grouped by their respective files and types.
 func TestConvertMultipleFiles(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_multi_file.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_multi_file.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -695,22 +697,7 @@ func TestConvertMultipleFiles(t *testing.T) {
 // TestConvertCountMode verifies that in "count" mode, hit counts are
 // summed (not OR'd) when the same line appears in multiple blocks.
 func TestConvertCountMode(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_count.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_count.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -761,22 +748,7 @@ func TestConvertCountMode(t *testing.T) {
 //
 // See: https://github.com/boumenot/gocover-cobertura/pull/24
 func TestConvertOverlappingBlocks(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_overlap.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_overlap.txt", &Ignore{})
 
 	require.Equal(t, "coverage", v.XMLName.Local)
 	require.Len(t, v.Packages, 1)
@@ -811,23 +783,7 @@ func TestConvertOverlappingBlocks(t *testing.T) {
 //
 // See: https://github.com/boumenot/gocover-cobertura/pull/25
 func TestConvertGlobalVarFunc(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_varfunc.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			t.Logf("convert error: %v", err)
-		}
-		pipe2wr.Close()
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_varfunc.txt", &Ignore{})
 
 	require.Equal(t, "coverage", v.XMLName.Local)
 	require.Len(t, v.Packages, 1)
@@ -861,23 +817,7 @@ func TestConvertGlobalVarFunc(t *testing.T) {
 // See review comment on PR #25:
 // "a local func value will be double counted after this PR"
 func TestConvertLocalVarFuncDoubleCounting(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_varfunc.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			t.Logf("convert error: %v", err)
-		}
-		pipe2wr.Close()
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_varfunc.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -912,23 +852,7 @@ func TestConvertLocalVarFuncDoubleCounting(t *testing.T) {
 // TestConvertNonFuncVarIgnored verifies that non-function package-level
 // variables (e.g. `var x = "hello"`) do not produce method entries.
 func TestConvertNonFuncVarIgnored(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_varfunc.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			t.Logf("convert error: %v", err)
-		}
-		pipe2wr.Close()
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_varfunc.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -949,23 +873,7 @@ func TestConvertNonFuncVarIgnored(t *testing.T) {
 // TestConvertShortAssignNotDoubleCounted verifies that closures assigned
 // with := (AssignStmt) inside a FuncDecl are not double-counted.
 func TestConvertShortAssignNotDoubleCounted(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_varfunc.txt")
-	require.NoError(t, err)
-
-	pipe2rd, pipe2wr := io.Pipe()
-
-	go func() {
-		err := convert(pipe1rd, pipe2wr, &Ignore{})
-		if err != nil {
-			t.Logf("convert error: %v", err)
-		}
-		pipe2wr.Close()
-	}()
-
-	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err = dec.Decode(&v)
-	require.NoError(t, err)
+	v := convertFixture(t, "testdata/testdata_varfunc.txt", &Ignore{})
 
 	require.Len(t, v.Packages, 1)
 	p := v.Packages[0]
@@ -1008,32 +916,22 @@ func TestConvertWithProjectDir(t *testing.T) {
 	absRoot, err := filepath.Abs(".")
 	require.NoError(t, err)
 
-	// Change to a temp directory so the default resolution would fail.
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(t.TempDir()))
-	defer func() { require.NoError(t, os.Chdir(origDir)) }()
-
 	// Read testdata from the absolute path.
 	data, err := os.ReadFile(filepath.Join(absRoot, "testdata", "testdata_set.txt"))
 	require.NoError(t, err)
 
-	// Without projectDir, convert produces empty output because packages.Load
-	// cannot resolve the testdata packages from a temp directory.
+	// With an unrelated projectDir, convert produces empty output because
+	// packages.Load cannot resolve the testdata packages from there.
 	var bufEmpty bytes.Buffer
-	err = convert(strings.NewReader(string(data)), &bufEmpty, &Ignore{})
+	err = convert(bytes.NewReader(data), &bufEmpty, io.Discard, conversionOptions{projectDir: t.TempDir()})
 	require.NoError(t, err)
 	require.NotContains(t, bufEmpty.String(), "line-rate=\"0.1",
-		"without -path, coverage data should be missing from output")
+		"with an unrelated -path, coverage data should be missing from output")
 
-	// Re-read data (the reader was consumed).
-	data, err = os.ReadFile(filepath.Join(absRoot, "testdata", "testdata_set.txt"))
-	require.NoError(t, err)
-
-	// With projectDir pointing to the original repo root, convert should
-	// produce actual coverage data even though cwd is a temp directory.
+	// With projectDir pointing to the repo root, convert should produce actual
+	// coverage data without changing the process working directory.
 	var buf bytes.Buffer
-	err = convert(strings.NewReader(string(data)), &buf, &Ignore{}, absRoot)
+	err = convert(bytes.NewReader(data), &buf, io.Discard, conversionOptions{projectDir: absRoot})
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "line-rate=\"0.1",
 		"with -path, coverage data should be present in output")
@@ -1048,14 +946,14 @@ func TestConvertStrictModeReturnsErrorOnSkippedProfiles(t *testing.T) {
 	data := "mode: set\nfmt/print.go:1.1,1.1 1 1\n"
 
 	var buf bytes.Buffer
-	err := convert(strings.NewReader(data), &buf, &Ignore{})
+	err := convert(strings.NewReader(data), &buf, io.Discard, conversionOptions{})
 
 	// Without strict mode, convert should succeed (profiles silently skipped).
 	require.NoError(t, err, "non-strict mode should not error on skipped profiles")
 
 	// With strict mode, convert should return an error.
 	var buf2 bytes.Buffer
-	err = convertStrict(strings.NewReader(data), &buf2, &Ignore{})
+	err = convertStrict(strings.NewReader(data), &buf2, conversionOptions{})
 	require.Error(t, err, "strict mode should error when profiles are skipped")
 	require.Contains(t, err.Error(), "skipped",
 		"error message should indicate profiles were skipped")
@@ -1069,7 +967,7 @@ func TestConvertStrictModePassesWhenNoSkips(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = convertStrict(pipe1rd, &buf, &Ignore{})
+	err = convertStrict(pipe1rd, &buf, conversionOptions{})
 	require.NoError(t, err, "strict mode should pass when all profiles resolve")
 	require.Contains(t, buf.String(), "coverage")
 }
@@ -1077,7 +975,7 @@ func TestConvertStrictModePassesWhenNoSkips(t *testing.T) {
 func TestConvertStrictModePropagatesDestinationError(t *testing.T) {
 	writer := &failOnceWriter{shouldFail: func([]byte) bool { return true }}
 
-	err := convertStrict(strings.NewReader("mode: set"), writer, &Ignore{})
+	err := convertStrict(strings.NewReader("mode: set"), writer, conversionOptions{})
 
 	require.True(t, writer.failed, "strict conversion did not write the validated report")
 	require.ErrorIs(t, err, errTestWrite)
@@ -1141,7 +1039,8 @@ replace private.example.com/team/dependency => ./missing-private-dependency
 
 			var output bytes.Buffer
 			var warnings bytes.Buffer
-			err := convertWithWarnings(strings.NewReader(input), &output, &warnings, &Ignore{}, dir)
+			options := conversionOptions{projectDir: dir}
+			err := convert(strings.NewReader(input), &output, &warnings, options)
 			require.NoError(t, err)
 			require.Contains(t, warnings.String(), test.wantWarning)
 			require.Contains(t, warnings.String(), test.packageName)
@@ -1153,7 +1052,7 @@ replace private.example.com/team/dependency => ./missing-private-dependency
 			}
 
 			output.Reset()
-			err = convertStrict(strings.NewReader(input), &output, &Ignore{}, dir)
+			err = convertStrict(strings.NewReader(input), &output, options)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), test.wantStrictDetail)
 			require.Contains(t, err.Error(), test.wantWarning)
@@ -1205,23 +1104,7 @@ func TestIgnoreNonCodeLines(t *testing.T) {
 		t.Run(
 			test.name,
 			func(t *testing.T) {
-				pipe1rd, err := os.Open(test.filename)
-				require.NoError(t, err)
-
-				pipe2rd, pipe2wr := io.Pipe()
-
-				go func() {
-					err := convert(pipe1rd, pipe2wr, &Ignore{NonCodeLines: test.ignoreNonCode})
-					if err != nil {
-						t.Logf("convert error: %v", err)
-					}
-					pipe2wr.Close()
-				}()
-
-				v := Coverage{}
-				dec := xml.NewDecoder(pipe2rd)
-				err = dec.Decode(&v)
-				require.NoError(t, err)
+				v := convertFixture(t, test.filename, &Ignore{NonCodeLines: test.ignoreNonCode})
 
 				require.Equal(t, "coverage", v.XMLName.Local)
 				require.Len(t, v.Packages, 1)

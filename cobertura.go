@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/xml"
-	"slices"
+	"sort"
 )
 
 type Coverage struct {
@@ -91,9 +91,10 @@ func (lines *Lines) NumLinesWithHits() (numLinesWithHits int64) {
 // For count or atomic modes, the new hits are added to the existing ones,
 // while for set mode, if either has hits, the result has hits.
 func (lines *Lines) AddOrUpdateLine(lineNumber int, hits int64, mode string) {
-	if index := slices.IndexFunc(*lines, func(line *Line) bool {
-		return line.Number == lineNumber
-	}); index != -1 {
+	index := sort.Search(len(*lines), func(i int) bool {
+		return (*lines)[i].Number >= lineNumber
+	})
+	if index < len(*lines) && (*lines)[index].Number == lineNumber {
 		if mode == "set" {
 			(*lines)[index].Hits |= hits
 		} else {
@@ -101,7 +102,10 @@ func (lines *Lines) AddOrUpdateLine(lineNumber int, hits int64, mode string) {
 		}
 		return
 	}
-	*lines = append(*lines, &Line{Number: lineNumber, Hits: hits})
+
+	*lines = append(*lines, nil)
+	copy((*lines)[index+1:], (*lines)[index:])
+	(*lines)[index] = &Line{Number: lineNumber, Hits: hits}
 }
 
 // HitRate returns a float32 from 0.0 to 1.0 representing what fraction of lines

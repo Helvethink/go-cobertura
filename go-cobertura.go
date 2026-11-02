@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -22,68 +23,76 @@ import (
 
 const coberturaDTDDecl = `<!DOCTYPE coverage SYSTEM "http://cobertura.sourceforge.net/xml/coverage-04.dtd">`
 
-var byFiles bool
-var projectDir string
-var strict bool
-
-func fatal(format string, a ...interface{}) {
-	_, _ = fmt.Fprintf(os.Stderr, format, a...)
-	os.Exit(1)
+type conversionOptions struct {
+	ignore     Ignore
+	byFiles    bool
+	projectDir string
+	strict     bool
 }
 
 func main() {
-	var ignore Ignore
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
 
-	flag.BoolVar(&byFiles, "by-files", false, "code coverage by file, not class")
-	flag.BoolVar(&ignore.GeneratedFiles, "ignore-gen-files", false, "ignore generated files")
-	flag.BoolVar(&ignore.NonCodeLines, "ignore-non-code-lines", false, "ignore lines with no code")
-	flag.BoolVar(&strict, "strict", false, "exit with error if any profiles are skipped")
-	flag.StringVar(&projectDir, "path", "", "set the project directory for package resolution")
-	ignoreDirsRe := flag.String("ignore-dirs", "", "ignore dirs matching this regexp")
-	ignoreFilesRe := flag.String("ignore-files", "", "ignore files matching this regexp")
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	options := conversionOptions{}
+	flags := flag.NewFlagSet("go-cobertura", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 
-	flag.Parse()
+	flags.BoolVar(&options.byFiles, "by-files", false, "code coverage by file, not class")
+	flags.BoolVar(&options.ignore.GeneratedFiles, "ignore-gen-files", false, "ignore generated files")
+	flags.BoolVar(&options.ignore.NonCodeLines, "ignore-non-code-lines", false, "ignore lines with no code")
+	flags.BoolVar(&options.strict, "strict", false, "exit with error if any profiles are skipped")
+	flags.StringVar(&options.projectDir, "path", "", "set the project directory for package resolution")
+	ignoreDirsRe := flags.String("ignore-dirs", "", "ignore dirs matching this regexp")
+	ignoreFilesRe := flags.String("ignore-files", "", "ignore files matching this regexp")
+
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 1
+	}
 
 	var err error
 	if *ignoreDirsRe != "" {
-		ignore.Dirs, err = regexp.Compile(*ignoreDirsRe)
+		options.ignore.Dirs, err = regexp.Compile(*ignoreDirsRe)
 		if err != nil {
-			fatal("Bad -ignore-dirs regexp: %s\n", err)
+			_, _ = fmt.Fprintf(stderr, "Bad -ignore-dirs regexp: %s\n", err)
+			return 1
 		}
 	}
 
 	if *ignoreFilesRe != "" {
-		ignore.Files, err = regexp.Compile(*ignoreFilesRe)
+		options.ignore.Files, err = regexp.Compile(*ignoreFilesRe)
 		if err != nil {
-			fatal("Bad -ignore-files regexp: %s\n", err)
+			_, _ = fmt.Fprintf(stderr, "Bad -ignore-files regexp: %s\n", err)
+			return 1
 		}
 	}
 
-	if strict {
-		if err := convertStrict(os.Stdin, os.Stdout, &ignore, projectDir); err != nil {
-			fatal("code coverage conversion failed: %s\n", err)
-		}
+	if options.strict {
+		err = convertStrict(stdin, stdout, options)
 	} else {
-		if err := convert(os.Stdin, os.Stdout, &ignore, projectDir); err != nil {
-			fatal("code coverage conversion failed: %s\n", err)
-		}
+		err = convert(stdin, stdout, stderr, options)
 	}
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "code coverage conversion failed: %s\n", err)
+		return 1
+	}
+	return 0
 }
 
-func convert(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string) error {
-	return convertWithWarnings(in, out, os.Stderr, ignore, pkgDir...)
-}
-
-func convertWithWarnings(in io.Reader, out, warnings io.Writer, ignore *Ignore, pkgDir ...string) error {
-	_, err := convertInternal(in, out, warnings, ignore, pkgDir...)
+func convert(in io.Reader, out, warnings io.Writer, options conversionOptions) error {
+	_, err := convertInternal(in, out, warnings, options)
 	return err
 }
 
 // convertStrict is like convert but returns an error if any profiles were
 // skipped or package loading produced diagnostics.
-func convertStrict(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string) error {
+func convertStrict(in io.Reader, out io.Writer, options conversionOptions) error {
 	var report bytes.Buffer
-	result, err := convertInternal(in, &report, io.Discard, ignore, pkgDir...)
+	result, err := convertInternal(in, &report, io.Discard, options)
 	if err != nil {
 		return err
 	}
@@ -121,18 +130,14 @@ type conversionResult struct {
 	diagnostics []packageLoadDiagnostic
 }
 
-func convertInternal(in io.Reader, out, warnings io.Writer, ignore *Ignore, pkgDir ...string) (conversionResult, error) {
+func convertInternal(in io.Reader, out, warnings io.Writer, options conversionOptions) (conversionResult, error) {
 	result := conversionResult{}
-	profiles, err := ParseProfiles(in, ignore)
+	profiles, err := ParseProfiles(in, &options.ignore)
 	if err != nil {
 		return result, err
 	}
 
-	var dir string
-	if len(pkgDir) > 0 {
-		dir = pkgDir[0]
-	}
-	pkgs, diagnostics, err := getPackages(profiles, dir)
+	pkgs, diagnostics, err := getPackages(profiles, options.projectDir)
 	if err != nil {
 		return result, err
 	}
@@ -157,7 +162,7 @@ func convertInternal(in io.Reader, out, warnings io.Writer, ignore *Ignore, pkgD
 	}
 
 	coverage := Coverage{Sources: sources, Packages: nil, Timestamp: time.Now().UnixNano() / int64(time.Millisecond)}
-	result.skipped, err = coverage.parseProfiles(profiles, pkgMap, diagnosticsByPackage(diagnostics), warnings, ignore)
+	result.skipped, err = coverage.parseProfiles(profiles, pkgMap, diagnosticsByPackage(diagnostics), warnings, options)
 	if err != nil {
 		return result, err
 	}
@@ -297,7 +302,7 @@ func (cov *Coverage) parseProfiles(
 	pkgMap map[string]*packages.Package,
 	packageDiagnostics map[string]bool,
 	warnings io.Writer,
-	ignore *Ignore,
+	options conversionOptions,
 ) (int, error) {
 	cov.Packages = []*Package{}
 	skipped := 0
@@ -321,7 +326,7 @@ func (cov *Coverage) parseProfiles(
 			skipped++
 			continue
 		}
-		skip, err := cov.parseProfile(profile, pkgPkg, ignore)
+		skip, err := cov.parseProfile(profile, pkgPkg, options)
 		if err != nil {
 			return skipped, err
 		}
@@ -335,7 +340,7 @@ func (cov *Coverage) parseProfiles(
 	return skipped, nil
 }
 
-func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ignore *Ignore) (bool, error) {
+func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, options conversionOptions) (bool, error) {
 	if pkgPkg == nil || pkgPkg.Module == nil {
 		return true, nil
 	}
@@ -359,7 +364,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 		return false, err
 	}
 
-	if ignore.Match(fileName, data) {
+	if options.ignore.Match(fileName, data) {
 		return false, nil
 	}
 
@@ -385,7 +390,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 		fset:       fset,
 		validLines: make(map[int]bool),
 	}
-	if ignore.NonCodeLines {
+	if options.ignore.NonCodeLines {
 		ast.Walk(validVisitor, parsed)
 	}
 
@@ -397,7 +402,8 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 		pkg:                pkg,
 		profile:            profile,
 		validLines:         validVisitor.validLines,
-		ignoreNonCodeLines: ignore.NonCodeLines,
+		ignoreNonCodeLines: options.ignore.NonCodeLines,
+		byFiles:            options.byFiles,
 	}
 	ast.Walk(visitor, parsed)
 	pkg.LineRate = pkg.HitRate()
@@ -426,6 +432,7 @@ type fileVisitor struct {
 	profile            *Profile
 	validLines         map[int]bool
 	ignoreNonCodeLines bool
+	byFiles            bool
 }
 
 func (v *fileVisitor) Visit(node ast.Node) ast.Visitor {
@@ -506,7 +513,7 @@ func (v *fileVisitor) methodFromNode(n ast.Node, name string) *Method {
 // file path is always used as the class name.
 func (v *fileVisitor) classForFunc(n *ast.FuncDecl) *Class {
 	var className string
-	if byFiles {
+	if v.byFiles {
 		// NOTE(boumenot): ReportGenerator creates links that collide if names are not distinct.
 		// The work around is to generate a fully qualified name based on the file path.
 		className = strings.ReplaceAll(v.fileName, "/", ".")
