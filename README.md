@@ -137,9 +137,10 @@ Some flags can be passed (each flag should only be used once):
 - `-strict`
 
   exit with an error if any profiles are skipped due to missing package
-  or module information.  By default, skipped profiles produce warnings
-  on stderr but the tool exits successfully.  Use this flag in CI
-  pipelines to catch silent data loss:
+  or module information, or if `packages.Load` reports package-resolution
+  diagnostics. By default, these conditions produce warnings on stderr but
+  the tool exits successfully and retains any profiles that can still be
+  resolved. Use this flag in CI pipelines to catch incomplete coverage data:
 
       go-cobertura -strict < coverage.txt > coverage.xml
 
@@ -171,6 +172,16 @@ locate those files and will skip them with a warning on stderr.
 
 Troubleshooting
 ---------------
+
+### Warning: package load diagnostic
+
+`go-cobertura` reports diagnostics returned by `packages.Load`, including the
+affected package and the underlying Go tool error. Typical causes include an
+unresolved import, an incomplete module checkout, or missing credentials for a
+private dependency. The profile is retained when its package and source files
+remain usable; otherwise a separate `skipping profile` warning is emitted.
+Use `-strict` in CI to turn any package-load diagnostic into a conversion
+error.
 
 ### Warning: skipping profile — no package/module information available
 
