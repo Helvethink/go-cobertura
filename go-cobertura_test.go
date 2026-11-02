@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -44,14 +45,67 @@ func TestConvertParseProfilesError(t *testing.T) {
 	require.Equal(t, "bad mode line: invalid data", err.Error())
 }
 
+var errTestWrite = errors.New("test write failure")
+
+type failOnceWriter struct {
+	shouldFail func([]byte) bool
+	failed     bool
+}
+
+func (w *failOnceWriter) Write(data []byte) (int, error) {
+	if !w.failed && w.shouldFail(data) {
+		w.failed = true
+		return 0, errTestWrite
+	}
+	return len(data), nil
+}
+
 func TestConvertOutputError(t *testing.T) {
-	pipe2rd, pipe2wr := io.Pipe()
-	err := pipe2wr.Close()
-	require.NoError(t, err)
-	defer func() { err := pipe2rd.Close(); require.NoError(t, err) }()
-	err = convert(strings.NewReader("mode: set"), pipe2wr, &Ignore{})
-	require.Error(t, err)
-	require.Equal(t, "io: read/write on closed pipe", err.Error())
+	tests := []struct {
+		name       string
+		shouldFail func([]byte) bool
+		context    string
+	}{
+		{
+			name: "XML header",
+			shouldFail: func(data []byte) bool {
+				return bytes.Contains(data, []byte(xml.Header))
+			},
+			context: "writing xml header",
+		},
+		{
+			name: "Cobertura DTD",
+			shouldFail: func(data []byte) bool {
+				return bytes.Contains(data, []byte(coberturaDTDDecl))
+			},
+			context: "writing cobertura dtd",
+		},
+		{
+			name: "coverage XML",
+			shouldFail: func(data []byte) bool {
+				return bytes.Contains(data, []byte("<coverage"))
+			},
+			context: "encoding coverage xml",
+		},
+		{
+			name: "trailing newline",
+			shouldFail: func(data []byte) bool {
+				return bytes.Equal(data, []byte("\n"))
+			},
+			context: "writing trailing newline",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &failOnceWriter{shouldFail: test.shouldFail}
+			err := convert(strings.NewReader("mode: set"), writer, &Ignore{})
+
+			require.True(t, writer.failed, "test writer did not reach the expected output stage")
+			require.ErrorIs(t, err, errTestWrite)
+			require.ErrorContains(t, err, test.context)
+		})
+	}
 }
 
 func TestConvertEmpty(t *testing.T) {
