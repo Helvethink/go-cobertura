@@ -173,6 +173,58 @@ func TestParseProfileRejectsEmptyModulePath(t *testing.T) {
 	require.ErrorContains(t, err, "module path is empty")
 }
 
+func TestParseProfileLoadsBuildConstrainedFile(t *testing.T) {
+	moduleDir := t.TempDir()
+	sourceDir := filepath.Join(moduleDir, "src")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(sourceDir, "result_x86.go"),
+		[]byte("package src\n\nfunc result() {}\n"),
+		0o644,
+	))
+
+	coverage := Coverage{}
+	profile := Profile{
+		FileName: "example.com/project/src/result_x86.go",
+		Mode:     "set",
+		Blocks: []ProfileBlock{{
+			StartLine: 3,
+			StartCol:  1,
+			EndLine:   3,
+			EndCol:    17,
+			NumStmt:   1,
+			Count:     1,
+		}},
+	}
+	pkg := packages.Package{
+		ID: "example.com/project/src",
+		Module: &packages.Module{
+			Path: "example.com/project",
+			Dir:  moduleDir,
+		},
+	}
+
+	skipped, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+	require.NoError(t, err)
+	require.False(t, skipped)
+	require.Len(t, coverage.Packages, 1)
+	require.Len(t, coverage.Packages[0].Classes, 1)
+}
+
+func TestParseProfileRejectsPathTraversal(t *testing.T) {
+	coverage := Coverage{}
+	profile := Profile{FileName: "example.com/project/../secret.go"}
+	pkg := packages.Package{
+		Module: &packages.Module{
+			Path: "example.com/project",
+			Dir:  t.TempDir(),
+		},
+	}
+
+	_, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+	require.ErrorContains(t, err, `source path "../secret.go" is outside module directory`)
+}
+
 func TestParseProfileNotReadable(t *testing.T) {
 	v := Coverage{}
 	profile := Profile{FileName: os.DevNull}

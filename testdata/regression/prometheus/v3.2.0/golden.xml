@@ -181637,7 +181637,7 @@
         </class>
       </classes>
     </package>
-    <package name="github.com/prometheus/prometheus/web/ui" line-rate="NaN" branch-rate="0" complexity="0">
+    <package name="github.com/prometheus/prometheus/web/ui" line-rate="0" branch-rate="0" complexity="0">
       <classes></classes>
     </package>
   </packages>

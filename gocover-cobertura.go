@@ -159,15 +159,41 @@ func getPackageName(filename string) string {
 	return strings.TrimSuffix(pkgName, "/")
 }
 
-func findAbsFilePath(pkg *packages.Package, profileName string) (string, error) {
+func readSourceFile(pkg *packages.Package, profileName, fileName string) (string, []byte, error) {
 	profileName = strings.ReplaceAll(profileName, "\\", "/")
 	filename := filepath.Base(profileName)
 	for _, fullpath := range pkg.GoFiles {
 		if filepath.Base(fullpath) == filename {
-			return fullpath, nil
+			data, err := os.ReadFile(fullpath)
+			if err != nil {
+				return "", nil, fmt.Errorf("reading source file %q: %w", profileName, err)
+			}
+			return fullpath, data, nil
 		}
 	}
-	return "", fmt.Errorf("unable to determine file path for %s", profileName)
+
+	if pkg.Module.Dir == "" {
+		return "", nil, fmt.Errorf("unable to determine file path for %s", profileName)
+	}
+	relativePath := filepath.FromSlash(fileName)
+	if !filepath.IsLocal(relativePath) {
+		return "", nil, fmt.Errorf("source path %q is outside module directory", fileName)
+	}
+
+	root, err := os.OpenRoot(pkg.Module.Dir)
+	if err != nil {
+		return "", nil, fmt.Errorf("opening module directory %q: %w", pkg.Module.Dir, err)
+	}
+	data, readErr := root.ReadFile(relativePath)
+	closeErr := root.Close()
+	if readErr != nil {
+		return "", nil, fmt.Errorf("reading source file %q: %w", profileName, readErr)
+	}
+	if closeErr != nil {
+		return "", nil, fmt.Errorf("closing module directory %q: %w", pkg.Module.Dir, closeErr)
+	}
+
+	return filepath.Join(pkg.Module.Dir, relativePath), data, nil
 }
 
 func (cov *Coverage) parseProfiles(profiles []*Profile, pkgMap map[string]*packages.Package, ignore *Ignore) (int, error) {
@@ -204,17 +230,13 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 	if !ok || fileName == "" {
 		return false, fmt.Errorf("profile %q is outside module %q", profile.FileName, pkgPkg.Module.Path)
 	}
-	absFilePath, err := findAbsFilePath(pkgPkg, profile.FileName)
+	absFilePath, data, err := readSourceFile(pkgPkg, profile.FileName, fileName)
 	if err != nil {
 		return false, err
 	}
 
 	fset := token.NewFileSet()
-	parsed, err := parser.ParseFile(fset, absFilePath, nil, 0)
-	if err != nil {
-		return false, err
-	}
-	data, err := os.ReadFile(absFilePath)
+	parsed, err := parser.ParseFile(fset, absFilePath, data, 0)
 	if err != nil {
 		return false, err
 	}
