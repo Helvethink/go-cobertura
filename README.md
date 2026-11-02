@@ -140,7 +140,9 @@ Some flags can be passed (each flag should only be used once):
   or module information, or if `packages.Load` reports package-resolution
   diagnostics. By default, these conditions produce warnings on stderr but
   the tool exits successfully and retains any profiles that can still be
-  resolved. Use this flag in CI pipelines to catch incomplete coverage data:
+  resolved. In strict mode, validation failures leave standard output empty,
+  so a partial Cobertura report cannot be published. Use this flag in CI
+  pipelines to catch incomplete coverage data:
 
       go-cobertura -strict < coverage.txt > coverage.xml
 
