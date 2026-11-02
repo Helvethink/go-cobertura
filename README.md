@@ -34,6 +34,12 @@ helpful in this area).
 I don’t expect to spend much more time here, but I will be more
 intentional about stewardship now that others depend on it.
 
+\[**2026-11-02**\]: [Helvethink](https://github.com/Helvethink) has taken
+over stewardship of the project and intends to maintain it actively. Because
+the project is used internally, Helvethink is committed to its long-term
+maintainability and will dedicate engineering time to fixes, reviews,
+regression coverage, and ongoing project upkeep.
+
 go tool cover XML (Cobertura) export
 ====================================
 
