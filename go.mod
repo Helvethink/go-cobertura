@@ -1,4 +1,4 @@
-module github.com/boumenot/gocover-cobertura
+module github.com/Helvethink/go-cobertura
 
 go 1.25.0
 

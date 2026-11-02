@@ -86,11 +86,11 @@ func discoverRegressionEntries(t *testing.T, root string) []regressionEntry {
 	return entries
 }
 
-// buildBinary compiles gocover-cobertura into a temporary binary and returns
+// buildBinary compiles go-cobertura into a temporary binary and returns
 // its path.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	name := "gocover-cobertura-test"
+	name := "go-cobertura-test"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -127,7 +127,7 @@ func ensureSourceAvailable(t *testing.T, project, tag string) string {
 	return cloneDir
 }
 
-// runConvertSubprocess runs the gocover-cobertura binary as a subprocess with
+// runConvertSubprocess runs the go-cobertura binary as a subprocess with
 // its working directory set to sourceDir so packages.Load resolves correctly.
 // Coverage data is piped to stdin.
 func runConvertSubprocess(t *testing.T, binary string, args []string, sourceDir, coverageData string) string {
@@ -141,7 +141,7 @@ func runConvertSubprocess(t *testing.T, binary string, args []string, sourceDir,
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	require.NoError(t, err, "gocover-cobertura failed (stderr: %s)", stderr.String())
+	require.NoError(t, err, "go-cobertura failed (stderr: %s)", stderr.String())
 
 	return normalizeOutput(stdout.String())
 }
@@ -199,7 +199,7 @@ func unifiedDiff(expected, actual string) string {
 }
 
 // TestRegression discovers regression test cases under testdata/regression/
-// and verifies that gocover-cobertura output matches golden files. The binary
+// and verifies that go-cobertura output matches golden files. The binary
 // is built once and run as a subprocess inside each project's cloned source
 // tree so that packages.Load() can resolve packages correctly.
 //
