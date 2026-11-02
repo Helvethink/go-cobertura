@@ -57,16 +57,15 @@ func TestConvertOutputError(t *testing.T) {
 func TestConvertEmpty(t *testing.T) {
 	data := `mode: set`
 
-	pipe2rd, pipe2wr := io.Pipe()
-	var readErr error
-	go func() {
-		readErr = convert(strings.NewReader(data), pipe2wr, &Ignore{})
-	}()
+	var output bytes.Buffer
+	err := convert(strings.NewReader(data), &output, &Ignore{})
+	require.NoError(t, err)
+	require.NotContains(t, output.String(), "NaN")
+	require.NotContains(t, output.String(), "Inf")
 
 	v := Coverage{}
-	dec := xml.NewDecoder(pipe2rd)
-	err := dec.Decode(&v)
-	require.NoError(t, readErr)
+	dec := xml.NewDecoder(strings.NewReader(output.String()))
+	err = dec.Decode(&v)
 	require.NoError(t, err)
 
 	require.Equal(t, "coverage", v.XMLName.Local)
@@ -90,11 +89,13 @@ func TestParseProfileEmptyPackages(t *testing.T) {
 
 func TestParseProfileDoesNotExist(t *testing.T) {
 	v := Coverage{}
-	profile := Profile{FileName: "does-not-exist"}
+	profile := Profile{FileName: "example.com/project/does-not-exist.go"}
 
 	pkg := packages.Package{
-		Name:   "does-not-exist",
-		Module: &packages.Module{},
+		Name: "project",
+		Module: &packages.Module{
+			Path: "example.com/project",
+		},
 	}
 
 	_, err := v.parseProfile(&profile, &pkg, &Ignore{})
@@ -103,6 +104,73 @@ func TestParseProfileDoesNotExist(t *testing.T) {
 	if !strings.Contains(err.Error(), "unable to determine file path") {
 		t.Error(err.Error())
 	}
+}
+
+func TestParseProfileModulePaths(t *testing.T) {
+	tests := []struct {
+		name        string
+		profileName string
+		modulePath  string
+	}{
+		{
+			name:        "module root",
+			profileName: "example.com/project/func1.go",
+			modulePath:  "example.com/project",
+		},
+		{
+			name:        "nested package",
+			profileName: "example.com/project/testdata/func1.go",
+			modulePath:  "example.com/project",
+		},
+		{
+			name:        "Windows separators",
+			profileName: `example.com\project\testdata\func1.go`,
+			modulePath:  "example.com/project",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			coverage := Coverage{}
+			profile := Profile{FileName: test.profileName}
+			pkg := packages.Package{
+				ID:      getPackageName(test.profileName),
+				GoFiles: []string{"testdata/func1.go"},
+				Module: &packages.Module{
+					Path: test.modulePath,
+				},
+			}
+
+			skipped, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+			require.NoError(t, err)
+			require.False(t, skipped)
+		})
+	}
+}
+
+func TestParseProfileRejectsMismatchedModulePath(t *testing.T) {
+	coverage := Coverage{}
+	profile := Profile{FileName: "example.com/other/file.go"}
+	pkg := packages.Package{
+		GoFiles: []string{"testdata/func1.go"},
+		Module: &packages.Module{
+			Path: "example.com/project",
+		},
+	}
+
+	require.NotPanics(t, func() {
+		_, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+		require.ErrorContains(t, err, `profile "example.com/other/file.go" is outside module "example.com/project"`)
+	})
+}
+
+func TestParseProfileRejectsEmptyModulePath(t *testing.T) {
+	coverage := Coverage{}
+	profile := Profile{FileName: "example.com/project/file.go"}
+	pkg := packages.Package{Module: &packages.Module{}}
+
+	_, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
+	require.ErrorContains(t, err, "module path is empty")
 }
 
 func TestParseProfileNotReadable(t *testing.T) {
@@ -388,7 +456,7 @@ func TestConvertClosureArg(t *testing.T) {
 
 	require.Equal(t, 1, totalMethods,
 		"closure arg should not create a separate method")
-	require.Greater(t, totalLines, 0,
+	require.Positive(t, totalLines,
 		"closure lines should be covered by enclosing FuncDecl")
 }
 
@@ -484,8 +552,8 @@ func TestConvertMultipleFiles(t *testing.T) {
 		"receiver methods should have type-based class")
 
 	// Lines should sum correctly across all classes.
-	require.Greater(t, v.LinesValid, int64(0))
-	require.Greater(t, v.LinesCovered, int64(0))
+	require.Positive(t, v.LinesValid)
+	require.Positive(t, v.LinesCovered)
 }
 
 // TestConvertCountMode verifies that in "count" mode, hit counts are
@@ -591,7 +659,7 @@ func TestConvertOverlappingBlocks(t *testing.T) {
 
 	// With PR #24's fix, overlapping blocks are properly deduplicated.
 	// All 5 lines should be unique and covered (OR of overlapping blocks).
-	require.Equal(t, 5, len(m.Lines),
+	require.Len(t, m.Lines, 5,
 		"expected 5 unique lines after dedup fix")
 
 	for _, l := range m.Lines {
