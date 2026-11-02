@@ -115,9 +115,9 @@ Some flags can be passed (each flag should only be used once):
 
 - `-ignore-gen-files`
 
-  ignore generated files. Typically files containing a comment
-  indicating that the file has been automatically generated. See
-  `genCodeRe` regexp in [ignore.go](ignore.go).
+  ignore files that follow Go's
+  [generated-code convention](https://go.dev/s/generatedcode): a canonical
+  `// Code generated ... DO NOT EDIT.` comment before the package clause.
 
 - `-ignore-non-code-lines`
 
