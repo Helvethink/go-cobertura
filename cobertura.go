@@ -62,7 +62,14 @@ type Lines []*Line
 // HitRate returns a float32 from 0.0 to 1.0 representing what fraction of lines
 // have hits
 func (lines *Lines) HitRate() (hitRate float32) {
-	return float32(lines.NumLinesWithHits()) / float32(len(*lines))
+	return calculateHitRate(lines.NumLinesWithHits(), lines.NumLines())
+}
+
+func calculateHitRate(covered, total int64) float32 {
+	if total == 0 {
+		return 0
+	}
+	return float32(covered) / float32(total)
 }
 
 // NumLines returns the number of lines
@@ -116,7 +123,7 @@ func (method Method) NumLinesWithHits() int64 {
 // HitRate returns a float32 from 0.0 to 1.0 representing what fraction of lines
 // have hits
 func (class Class) HitRate() float32 {
-	return float32(class.NumLinesWithHits()) / float32(class.NumLines())
+	return calculateHitRate(class.NumLinesWithHits(), class.NumLines())
 }
 
 // NumLines returns the number of lines
@@ -138,7 +145,7 @@ func (class Class) NumLinesWithHits() (numLinesWithHits int64) {
 // HitRate returns a float32 from 0.0 to 1.0 representing what fraction of lines
 // have hits
 func (pkg Package) HitRate() float32 {
-	return float32(pkg.NumLinesWithHits()) / float32(pkg.NumLines())
+	return calculateHitRate(pkg.NumLinesWithHits(), pkg.NumLines())
 }
 
 // NumLines returns the number of lines
@@ -160,7 +167,7 @@ func (pkg Package) NumLinesWithHits() (numLinesWithHits int64) {
 // HitRate returns a float32 from 0.0 to 1.0 representing what fraction of lines
 // have hits
 func (cov *Coverage) HitRate() float32 {
-	return float32(cov.NumLinesWithHits()) / float32(cov.NumLines())
+	return calculateHitRate(cov.NumLinesWithHits(), cov.NumLines())
 }
 
 // NumLines returns the number of lines

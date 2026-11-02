@@ -154,12 +154,13 @@ func appendIfUnique(sources []*Source, dir string) []*Source {
 }
 
 func getPackageName(filename string) string {
+	filename = strings.ReplaceAll(filename, "\\", "/")
 	pkgName, _ := filepath.Split(filename)
-	// TODO(boumenot): Windows vs. Linux
-	return strings.TrimRight(strings.TrimRight(pkgName, "\\"), "/")
+	return strings.TrimSuffix(pkgName, "/")
 }
 
 func findAbsFilePath(pkg *packages.Package, profileName string) (string, error) {
+	profileName = strings.ReplaceAll(profileName, "\\", "/")
 	filename := filepath.Base(profileName)
 	for _, fullpath := range pkg.GoFiles {
 		if filepath.Base(fullpath) == filename {
@@ -194,7 +195,15 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 		fmt.Fprintf(os.Stderr, "warning: skipping profile %s: no package/module information available\n", profile.FileName)
 		return true, nil
 	}
-	fileName := profile.FileName[len(pkgPkg.Module.Path)+1:]
+	profileName := strings.ReplaceAll(profile.FileName, "\\", "/")
+	modulePath := strings.TrimSuffix(strings.ReplaceAll(pkgPkg.Module.Path, "\\", "/"), "/")
+	if modulePath == "" {
+		return false, fmt.Errorf("unable to resolve profile %q: module path is empty", profile.FileName)
+	}
+	fileName, ok := strings.CutPrefix(profileName, modulePath+"/")
+	if !ok || fileName == "" {
+		return false, fmt.Errorf("profile %q is outside module %q", profile.FileName, pkgPkg.Module.Path)
+	}
 	absFilePath, err := findAbsFilePath(pkgPkg, profile.FileName)
 	if err != nil {
 		return false, err
@@ -218,7 +227,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 	pkgPath = strings.TrimRight(strings.TrimRight(pkgPath, "/"), "\\")
 	pkgPath = filepath.Join(pkgPkg.Module.Path, pkgPath)
 	// TODO(boumenot): package paths are not file paths, there is a consistent separator
-	pkgPath = strings.Replace(pkgPath, "\\", "/", -1)
+	pkgPath = strings.ReplaceAll(pkgPath, "\\", "/")
 
 	var pkg *Package
 	for _, p := range cov.Packages {
@@ -361,8 +370,8 @@ func (v *fileVisitor) classForFunc(n *ast.FuncDecl) *Class {
 	if byFiles {
 		// NOTE(boumenot): ReportGenerator creates links that collide if names are not distinct.
 		// The work around is to generate a fully qualified name based on the file path.
-		className = strings.Replace(v.fileName, "/", ".", -1)
-		className = strings.Replace(className, "\\", ".", -1)
+		className = strings.ReplaceAll(v.fileName, "/", ".")
+		className = strings.ReplaceAll(className, "\\", ".")
 	} else if n != nil {
 		className = v.recvName(n)
 	} else {
