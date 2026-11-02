@@ -162,24 +162,32 @@ func TestParseProfileDoesNotExist(t *testing.T) {
 
 func TestParseProfileModulePaths(t *testing.T) {
 	tests := []struct {
-		name        string
-		profileName string
-		modulePath  string
+		name         string
+		profileName  string
+		modulePath   string
+		wantPackage  string
+		wantFilename string
 	}{
 		{
-			name:        "module root",
-			profileName: "example.com/project/func1.go",
-			modulePath:  "example.com/project",
+			name:         "module root",
+			profileName:  "example.com/project/func1.go",
+			modulePath:   "example.com/project",
+			wantPackage:  "example.com/project",
+			wantFilename: "func1.go",
 		},
 		{
-			name:        "nested package",
-			profileName: "example.com/project/testdata/func1.go",
-			modulePath:  "example.com/project",
+			name:         "nested package",
+			profileName:  "example.com/project/testdata/func1.go",
+			modulePath:   "example.com/project",
+			wantPackage:  "example.com/project/testdata",
+			wantFilename: "testdata/func1.go",
 		},
 		{
-			name:        "Windows separators",
-			profileName: `example.com\project\testdata\func1.go`,
-			modulePath:  "example.com/project",
+			name:         "Windows separators",
+			profileName:  `example.com\project\testdata\func1.go`,
+			modulePath:   "example.com/project",
+			wantPackage:  "example.com/project/testdata",
+			wantFilename: "testdata/func1.go",
 		},
 	}
 
@@ -198,6 +206,28 @@ func TestParseProfileModulePaths(t *testing.T) {
 			skipped, err := coverage.parseProfile(&profile, &pkg, &Ignore{})
 			require.NoError(t, err)
 			require.False(t, skipped)
+			require.Len(t, coverage.Packages, 1)
+			require.Equal(t, test.wantPackage, coverage.Packages[0].Name)
+			require.Len(t, coverage.Packages[0].Classes, 1)
+			require.Equal(t, test.wantFilename, coverage.Packages[0].Classes[0].Filename)
+		})
+	}
+}
+
+func TestGetPackageNameUsesImportPathSeparators(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{name: "slash separated", filename: "example.com/project/pkg/file.go", want: "example.com/project/pkg"},
+		{name: "Windows separated", filename: `example.com\project\pkg\file.go`, want: "example.com/project/pkg"},
+		{name: "module root file", filename: "file.go", want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, getPackageName(test.filename))
 		})
 	}
 }

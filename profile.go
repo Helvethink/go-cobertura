@@ -74,7 +74,7 @@ func ParseProfiles(in io.Reader, ignore *Ignore) ([]*Profile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bad profile line %d: %w", lineNumber, err)
 		}
-		fn := m[1]
+		fn := normalizeImportPath(m[1])
 		if ignore.Match(fn, nil) {
 			continue
 		}
@@ -103,6 +103,10 @@ func ParseProfiles(in io.Reader, ignore *Ignore) ([]*Profile, error) {
 	}
 	sort.Sort(byFileName(profiles))
 	return profiles, nil
+}
+
+func normalizeImportPath(value string) string {
+	return strings.ReplaceAll(value, `\`, "/")
 }
 
 type blocksByStart []ProfileBlock

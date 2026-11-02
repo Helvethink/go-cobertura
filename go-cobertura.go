@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -251,14 +252,12 @@ func appendIfUnique(sources []*Source, dir string) []*Source {
 }
 
 func getPackageName(filename string) string {
-	filename = strings.ReplaceAll(filename, "\\", "/")
-	pkgName, _ := filepath.Split(filename)
+	pkgName, _ := path.Split(normalizeImportPath(filename))
 	return strings.TrimSuffix(pkgName, "/")
 }
 
 func readSourceFile(pkg *packages.Package, profileName, fileName string) (string, []byte, error) {
-	profileName = strings.ReplaceAll(profileName, "\\", "/")
-	filename := filepath.Base(profileName)
+	filename := path.Base(profileName)
 	for _, fullpath := range pkg.GoFiles {
 		if filepath.Base(fullpath) == filename {
 			data, err := os.ReadFile(fullpath)
@@ -340,8 +339,8 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 	if pkgPkg == nil || pkgPkg.Module == nil {
 		return true, nil
 	}
-	profileName := strings.ReplaceAll(profile.FileName, "\\", "/")
-	modulePath := strings.TrimSuffix(strings.ReplaceAll(pkgPkg.Module.Path, "\\", "/"), "/")
+	profileName := normalizeImportPath(profile.FileName)
+	modulePath := strings.TrimSuffix(normalizeImportPath(pkgPkg.Module.Path), "/")
 	if modulePath == "" {
 		return false, fmt.Errorf("unable to resolve profile %q: module path is empty", profile.FileName)
 	}
@@ -349,7 +348,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 	if !ok || fileName == "" {
 		return false, fmt.Errorf("profile %q is outside module %q", profile.FileName, pkgPkg.Module.Path)
 	}
-	absFilePath, data, err := readSourceFile(pkgPkg, profile.FileName, fileName)
+	absFilePath, data, err := readSourceFile(pkgPkg, profileName, fileName)
 	if err != nil {
 		return false, err
 	}
@@ -364,11 +363,10 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 		return false, nil
 	}
 
-	pkgPath, _ := filepath.Split(fileName)
-	pkgPath = strings.TrimRight(strings.TrimRight(pkgPath, "/"), "\\")
-	pkgPath = filepath.Join(pkgPkg.Module.Path, pkgPath)
-	// TODO(boumenot): package paths are not file paths, there is a consistent separator
-	pkgPath = strings.ReplaceAll(pkgPath, "\\", "/")
+	pkgPath := modulePath
+	if pkgDir := path.Dir(fileName); pkgDir != "." {
+		pkgPath = path.Join(modulePath, pkgDir)
+	}
 
 	var pkg *Package
 	for _, p := range cov.Packages {
@@ -377,7 +375,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ig
 		}
 	}
 	if pkg == nil {
-		pkg = &Package{Name: pkgPkg.ID, Classes: []*Class{}}
+		pkg = &Package{Name: pkgPath, Classes: []*Class{}}
 		cov.Packages = append(cov.Packages, pkg)
 	}
 
@@ -512,7 +510,6 @@ func (v *fileVisitor) classForFunc(n *ast.FuncDecl) *Class {
 		// NOTE(boumenot): ReportGenerator creates links that collide if names are not distinct.
 		// The work around is to generate a fully qualified name based on the file path.
 		className = strings.ReplaceAll(v.fileName, "/", ".")
-		className = strings.ReplaceAll(className, "\\", ".")
 	} else if n != nil {
 		className = v.recvName(n)
 	} else {

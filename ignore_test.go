@@ -27,6 +27,12 @@ func TestIgnore(t *testing.T) {
 			dirsExpected: true,
 		},
 		{
+			name:         "matching Windows directory",
+			fileName:     `foo\bar\zip.go`,
+			contents:     "blah blah...",
+			dirsExpected: true,
+		},
+		{
 			name:          "matching file",
 			fileName:      "zip/foobar/gen.go",
 			contents:      "blah blah...",

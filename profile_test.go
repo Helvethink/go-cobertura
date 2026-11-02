@@ -38,7 +38,7 @@ func TestParseProfilesValidInput(t *testing.T) {
 		{
 			name:     "Windows path",
 			input:    "mode: set\nC:\\project\\file.go:1.2,3.4 1 5\n",
-			fileName: `C:\project\file.go`,
+			fileName: "C:/project/file.go",
 			mode:     "set",
 		},
 	}
