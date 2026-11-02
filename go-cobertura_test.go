@@ -1029,6 +1029,7 @@ func TestConvertStrictModeReturnsErrorOnSkippedProfiles(t *testing.T) {
 	require.Error(t, err, "strict mode should error when profiles are skipped")
 	require.Contains(t, err.Error(), "skipped",
 		"error message should indicate profiles were skipped")
+	require.Empty(t, buf2.String(), "strict validation failure must not publish a partial report")
 }
 
 // TestConvertStrictModePassesWhenNoSkips verifies that strict mode does
@@ -1041,6 +1042,16 @@ func TestConvertStrictModePassesWhenNoSkips(t *testing.T) {
 	err = convertStrict(pipe1rd, &buf, &Ignore{})
 	require.NoError(t, err, "strict mode should pass when all profiles resolve")
 	require.Contains(t, buf.String(), "coverage")
+}
+
+func TestConvertStrictModePropagatesDestinationError(t *testing.T) {
+	writer := &failOnceWriter{shouldFail: func([]byte) bool { return true }}
+
+	err := convertStrict(strings.NewReader("mode: set"), writer, &Ignore{})
+
+	require.True(t, writer.failed, "strict conversion did not write the validated report")
+	require.ErrorIs(t, err, errTestWrite)
+	require.ErrorContains(t, err, "writing strict coverage report")
 }
 
 func TestConvertSurfacesPackageLoadDiagnostics(t *testing.T) {
@@ -1116,6 +1127,7 @@ replace private.example.com/team/dependency => ./missing-private-dependency
 			require.Error(t, err)
 			require.Contains(t, err.Error(), test.wantStrictDetail)
 			require.Contains(t, err.Error(), test.wantWarning)
+			require.Empty(t, output.String(), "strict validation failure must not publish a partial report")
 		})
 	}
 }

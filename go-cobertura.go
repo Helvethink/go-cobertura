@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -80,7 +81,8 @@ func convertWithWarnings(in io.Reader, out, warnings io.Writer, ignore *Ignore, 
 // convertStrict is like convert but returns an error if any profiles were
 // skipped or package loading produced diagnostics.
 func convertStrict(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string) error {
-	result, err := convertInternal(in, out, io.Discard, ignore, pkgDir...)
+	var report bytes.Buffer
+	result, err := convertInternal(in, &report, io.Discard, ignore, pkgDir...)
 	if err != nil {
 		return err
 	}
@@ -93,6 +95,9 @@ func convertStrict(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string
 			parts = append(parts, diagnostic.String())
 		}
 		return fmt.Errorf("strict conversion failed: %s", strings.Join(parts, "; "))
+	}
+	if _, err := io.Copy(out, &report); err != nil {
+		return fmt.Errorf("writing strict coverage report: %w", err)
 	}
 	return nil
 }
