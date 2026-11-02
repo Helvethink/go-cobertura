@@ -31,13 +31,13 @@ Go 1.27 or newer is required to build and install the project.
 Until the first Helvethink release is tagged, install the maintained `main` branch:
 
 ```bash
-$ go install github.com/Helvethink/go-cobertura@main
+go install github.com/Helvethink/go-cobertura@main
 ```
 
 After that release is available, prefer the latest tagged version:
 
 ```bash
-$ go install github.com/Helvethink/go-cobertura@latest
+go install github.com/Helvethink/go-cobertura@latest
 ```
 
 Usage
@@ -46,8 +46,8 @@ Usage
 `go-cobertura` reads from the standard input:
 
 ```bash
-$ go test -coverprofile=coverage.txt -covermode=count ./...
-$ go-cobertura < coverage.txt > coverage.xml
+go test -coverprofile=coverage.txt -covermode=count ./...
+go-cobertura < coverage.txt > coverage.xml
 ```
 
 Note that you should run this from the directory which holds your `go.mod` file.
