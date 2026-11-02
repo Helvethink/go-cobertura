@@ -46,19 +46,33 @@ func ParseProfiles(in io.Reader, ignore *Ignore) ([]*Profile, error) {
 	// where the fields are: name.go:line.column,line.column numberOfStatements count
 	s := bufio.NewScanner(in)
 	mode := ""
+	lineNumber := 0
 	for s.Scan() {
-		line := s.Text()
+		lineNumber++
+		line := strings.TrimSuffix(s.Text(), "\r")
 		if mode == "" {
 			const p = "mode: "
 			if !strings.HasPrefix(line, p) || line == p {
 				return nil, fmt.Errorf("bad mode line: %v", line)
 			}
 			mode = line[len(p):]
+			switch mode {
+			case "set", "count", "atomic":
+			default:
+				return nil, fmt.Errorf("unsupported coverage mode %q", mode)
+			}
+			continue
+		}
+		if line == "" {
 			continue
 		}
 		m := lineRe.FindStringSubmatch(line)
 		if m == nil {
-			continue
+			return nil, fmt.Errorf("bad profile line %d: %q", lineNumber, line)
+		}
+		block, err := parseProfileBlock(m)
+		if err != nil {
+			return nil, fmt.Errorf("bad profile line %d: %w", lineNumber, err)
 		}
 		fn := m[1]
 		if ignore.Match(fn, nil) {
@@ -72,14 +86,7 @@ func ParseProfiles(in io.Reader, ignore *Ignore) ([]*Profile, error) {
 			}
 			files[fn] = p
 		}
-		p.Blocks = append(p.Blocks, ProfileBlock{
-			StartLine: toInt(m[2]),
-			StartCol:  toInt(m[3]),
-			EndLine:   toInt(m[4]),
-			EndCol:    toInt(m[5]),
-			NumStmt:   toInt(m[6]),
-			Count:     toInt(m[7]),
-		})
+		p.Blocks = append(p.Blocks, block)
 	}
 	if err := s.Err(); err != nil {
 		return nil, err
@@ -107,12 +114,26 @@ func (b blocksByStart) Less(i, j int) bool {
 	return bi.StartLine < bj.StartLine || bi.StartLine == bj.StartLine && bi.StartCol < bj.StartCol
 }
 
-var lineRe = regexp.MustCompile(`^(.+):([0-9]+).([0-9]+),([0-9]+).([0-9]+) ([0-9]+) ([0-9]+)$`)
+var lineRe = regexp.MustCompile(`^(.+):([0-9]+)\.([0-9]+),([0-9]+)\.([0-9]+) ([0-9]+) ([0-9]+)$`)
 
-func toInt(s string) int {
-	i, err := strconv.Atoi(s)
-	if err != nil {
-		panic(err)
+func parseProfileBlock(match []string) (ProfileBlock, error) {
+	names := [...]string{"start line", "start column", "end line", "end column", "statement count", "hit count"}
+	var values [len(names)]int
+	for index, name := range names {
+		value := match[index+2]
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return ProfileBlock{}, fmt.Errorf("invalid %s %q: %w", name, value, err)
+		}
+		values[index] = parsed
 	}
-	return i
+
+	return ProfileBlock{
+		StartLine: values[0],
+		StartCol:  values[1],
+		EndLine:   values[2],
+		EndCol:    values[3],
+		NumStmt:   values[4],
+		Count:     values[5],
+	}, nil
 }
