@@ -1,4 +1,4 @@
-## Forked from t-yuki
+## Forked from t-yuki and boumenot
 
 This is a **fork** of https://github.com/boumenot/gocover-cobertura.
 
@@ -226,15 +226,16 @@ other operating systems.  To regenerate golden files on Windows, use WSL.
 | prometheus/prometheus | v3.2.0 | 78,123 |
 | kubernetes/kubernetes | v1.32.0 | 26,956 |
 
-~~Authors~~Merger
+~~Authors~~Merger(New)
 -------
 
-[Christopher Boumenot (boumenot)](https://github.com/boumenot)
+[Helvethink](https://github.com/Helvethink)
 
 Thanks
 ------
 
  * [Yukinari Toyota (t-yuki)](https://github.com/t-yuki)
+ * [Christopher Boumenot (boumenot)](https://github.com/boumenot)
  * This tool is originated from [gocov-xml](https://github.com/AlekSi/gocov-xml) by [Alexey Palazhchenko (AlekSi)](https://github.com/AlekSi)
  * [DarcySail](https://github.com/DarcySail)'s [PR](https://github.com/t-yuki/gocover-cobertura/pull/22)
  * [maxatome](https://github.com/maxatome)'s [PR](https://github.com/t-yuki/gocover-cobertura/pull/19)
