@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -68,36 +69,72 @@ func main() {
 }
 
 func convert(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string) error {
-	_, err := convertInternal(in, out, ignore, pkgDir...)
+	return convertWithWarnings(in, out, os.Stderr, ignore, pkgDir...)
+}
+
+func convertWithWarnings(in io.Reader, out, warnings io.Writer, ignore *Ignore, pkgDir ...string) error {
+	_, err := convertInternal(in, out, warnings, ignore, pkgDir...)
 	return err
 }
 
-// convertStrict is like convert but returns an error if any profiles
-// were skipped due to missing package/module information.
+// convertStrict is like convert but returns an error if any profiles were
+// skipped or package loading produced diagnostics.
 func convertStrict(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string) error {
-	skipped, err := convertInternal(in, out, ignore, pkgDir...)
+	result, err := convertInternal(in, out, io.Discard, ignore, pkgDir...)
 	if err != nil {
 		return err
 	}
-	if skipped > 0 {
-		return fmt.Errorf("%d profile(s) skipped due to missing package/module information", skipped)
+	if result.skipped > 0 || len(result.diagnostics) > 0 {
+		parts := make([]string, 0, len(result.diagnostics)+1)
+		if result.skipped > 0 {
+			parts = append(parts, fmt.Sprintf("%d profile(s) skipped", result.skipped))
+		}
+		for _, diagnostic := range result.diagnostics {
+			parts = append(parts, diagnostic.String())
+		}
+		return fmt.Errorf("strict conversion failed: %s", strings.Join(parts, "; "))
 	}
 	return nil
 }
 
-func convertInternal(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...string) (int, error) {
+type packageLoadDiagnostic struct {
+	packageID  string
+	dependency string
+	err        packages.Error
+}
+
+func (d packageLoadDiagnostic) String() string {
+	if d.dependency != "" && d.dependency != d.packageID {
+		return fmt.Sprintf("package %q via dependency %q: %s", d.packageID, d.dependency, d.err.Error())
+	}
+	return fmt.Sprintf("package %q: %s", d.packageID, d.err.Error())
+}
+
+type conversionResult struct {
+	skipped     int
+	diagnostics []packageLoadDiagnostic
+}
+
+func convertInternal(in io.Reader, out, warnings io.Writer, ignore *Ignore, pkgDir ...string) (conversionResult, error) {
+	result := conversionResult{}
 	profiles, err := ParseProfiles(in, ignore)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 
 	var dir string
 	if len(pkgDir) > 0 {
 		dir = pkgDir[0]
 	}
-	pkgs, err := getPackages(profiles, dir)
+	pkgs, diagnostics, err := getPackages(profiles, dir)
 	if err != nil {
-		return 0, err
+		return result, err
+	}
+	result.diagnostics = diagnostics
+	for _, diagnostic := range diagnostics {
+		if _, err := fmt.Fprintf(warnings, "warning: package load diagnostic: %s\n", diagnostic.String()); err != nil {
+			return result, fmt.Errorf("writing package load diagnostic: %w", err)
+		}
 	}
 
 	sources := make([]*Source, 0)
@@ -114,40 +151,89 @@ func convertInternal(in io.Reader, out io.Writer, ignore *Ignore, pkgDir ...stri
 	}
 
 	coverage := Coverage{Sources: sources, Packages: nil, Timestamp: time.Now().UnixNano() / int64(time.Millisecond)}
-	skipped, err := coverage.parseProfiles(profiles, pkgMap, ignore)
+	result.skipped, err = coverage.parseProfiles(profiles, pkgMap, diagnosticsByPackage(diagnostics), warnings, ignore)
 	if err != nil {
-		return skipped, err
+		return result, err
 	}
 
 	if _, err := fmt.Fprint(out, xml.Header); err != nil {
-		return skipped, fmt.Errorf("writing xml header: %w", err)
+		return result, fmt.Errorf("writing xml header: %w", err)
 	}
 	if _, err := fmt.Fprintln(out, coberturaDTDDecl); err != nil {
-		return skipped, fmt.Errorf("writing cobertura dtd: %w", err)
+		return result, fmt.Errorf("writing cobertura dtd: %w", err)
 	}
 
 	encoder := xml.NewEncoder(out)
 	encoder.Indent("", "  ")
 	if err := encoder.Encode(coverage); err != nil {
-		return skipped, fmt.Errorf("encoding coverage xml: %w", err)
+		return result, fmt.Errorf("encoding coverage xml: %w", err)
 	}
 
 	if _, err := fmt.Fprintln(out); err != nil {
-		return skipped, fmt.Errorf("writing trailing newline: %w", err)
+		return result, fmt.Errorf("writing trailing newline: %w", err)
 	}
-	return skipped, nil
+	return result, nil
 }
 
-func getPackages(profiles []*Profile, dir string) ([]*packages.Package, error) {
+func getPackages(profiles []*Profile, dir string) ([]*packages.Package, []packageLoadDiagnostic, error) {
 	if len(profiles) == 0 {
-		return []*packages.Package{}, nil
+		return []*packages.Package{}, nil, nil
 	}
 
-	var pkgNames []string
+	pkgNames := make([]string, 0)
+	seenPkgNames := make(map[string]bool)
 	for _, profile := range profiles {
-		pkgNames = append(pkgNames, getPackageName(profile.FileName))
+		pkgName := getPackageName(profile.FileName)
+		if !seenPkgNames[pkgName] {
+			pkgNames = append(pkgNames, pkgName)
+			seenPkgNames[pkgName] = true
+		}
 	}
-	return packages.Load(&packages.Config{Mode: packages.NeedFiles | packages.NeedModule, Dir: dir}, pkgNames...)
+	pkgs, err := packages.Load(&packages.Config{
+		Mode: packages.NeedFiles | packages.NeedImports | packages.NeedDeps | packages.NeedModule,
+		Dir:  dir,
+	}, pkgNames...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading packages: %w", err)
+	}
+
+	diagnostics := make([]packageLoadDiagnostic, 0)
+	for _, root := range pkgs {
+		packages.Visit([]*packages.Package{root}, func(pkg *packages.Package) bool {
+			for _, pkgErr := range pkg.Errors {
+				diagnostics = append(diagnostics, packageLoadDiagnostic{
+					packageID:  root.ID,
+					dependency: pkg.ID,
+					err:        pkgErr,
+				})
+			}
+			return true
+		}, nil)
+	}
+	sort.Slice(diagnostics, func(i, j int) bool {
+		if diagnostics[i].packageID != diagnostics[j].packageID {
+			return diagnostics[i].packageID < diagnostics[j].packageID
+		}
+		if diagnostics[i].dependency != diagnostics[j].dependency {
+			return diagnostics[i].dependency < diagnostics[j].dependency
+		}
+		if diagnostics[i].err.Pos != diagnostics[j].err.Pos {
+			return diagnostics[i].err.Pos < diagnostics[j].err.Pos
+		}
+		if diagnostics[i].err.Msg != diagnostics[j].err.Msg {
+			return diagnostics[i].err.Msg < diagnostics[j].err.Msg
+		}
+		return diagnostics[i].err.Kind < diagnostics[j].err.Kind
+	})
+	return pkgs, diagnostics, nil
+}
+
+func diagnosticsByPackage(diagnostics []packageLoadDiagnostic) map[string]bool {
+	result := make(map[string]bool, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		result[diagnostic.packageID] = true
+	}
+	return result
 }
 
 func appendIfUnique(sources []*Source, dir string) []*Source {
@@ -202,12 +288,35 @@ func readSourceFile(pkg *packages.Package, profileName, fileName string) (string
 	return filepath.Join(pkg.Module.Dir, relativePath), data, nil
 }
 
-func (cov *Coverage) parseProfiles(profiles []*Profile, pkgMap map[string]*packages.Package, ignore *Ignore) (int, error) {
+func (cov *Coverage) parseProfiles(
+	profiles []*Profile,
+	pkgMap map[string]*packages.Package,
+	packageDiagnostics map[string]bool,
+	warnings io.Writer,
+	ignore *Ignore,
+) (int, error) {
 	cov.Packages = []*Package{}
 	skipped := 0
 	for _, profile := range profiles {
 		pkgName := getPackageName(profile.FileName)
 		pkgPkg := pkgMap[pkgName]
+		if pkgPkg == nil || pkgPkg.Module == nil {
+			reason := "no package/module information available"
+			if packageDiagnostics[pkgName] {
+				reason = "package resolution failed; see package load diagnostic"
+			}
+			if _, err := fmt.Fprintf(
+				warnings,
+				"warning: skipping profile %s (package %q): %s\n",
+				profile.FileName,
+				pkgName,
+				reason,
+			); err != nil {
+				return skipped, fmt.Errorf("writing skipped profile warning: %w", err)
+			}
+			skipped++
+			continue
+		}
 		skip, err := cov.parseProfile(profile, pkgPkg, ignore)
 		if err != nil {
 			return skipped, err
@@ -224,7 +333,6 @@ func (cov *Coverage) parseProfiles(profiles []*Profile, pkgMap map[string]*packa
 
 func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, ignore *Ignore) (bool, error) {
 	if pkgPkg == nil || pkgPkg.Module == nil {
-		fmt.Fprintf(os.Stderr, "warning: skipping profile %s: no package/module information available\n", profile.FileName)
 		return true, nil
 	}
 	profileName := strings.ReplaceAll(profile.FileName, "\\", "/")
