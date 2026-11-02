@@ -40,7 +40,7 @@ jobs:
 
 
     - name: Cache regression source trees
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: testdata/regression/**/src
         key: regression-src-${{ hashFiles('regression_test.go') }}
