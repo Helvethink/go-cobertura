@@ -4,82 +4,61 @@
 
 This is a **fork** of https://github.com/boumenot/gocover-cobertura.
 
-At the time of this writing the repository appears to be on *pause* with
-several outstanding PRs, and forks with interesting contributions.  This
-repo consolidates those outstanding forks, and combines them into one repo.
+At the time of this writing the repository appears to be on *pause* with several outstanding PRs, and forks with interesting contributions. This repo consolidates those outstanding forks, and combines them into one repo.
 
-\[**2026-05-01**\]: This project has evolved from a private fork
-created for my own needs into something that is now used by many
-others. Historically, I have not focused heavily on maintaining this
-repository—I’ve occasionally merged PRs or made fixes, but for my
-purposes, the functionality was “good enough.”
+\[**2026-05-01**\]: This project has evolved from a private fork created for my own needs into something that is now used by many others. Historically, I have not focused heavily on maintaining this repository—I’ve occasionally merged PRs or made fixes, but for my purposes, the functionality was “good enough.”
 
-However, that context has changed. While this fork met my original
-goals, it is now clear that others are relying on it. As a result, I
-feel a greater sense of responsibility for its quality and stability.
+However, that context has changed. While this fork met my original goals, it is now clear that others are relying on it. As a result, I feel a greater sense of responsibility for its quality and stability.
 
-To address this, I plan to strengthen the repository by introducing a
-regression test suite based on popular open-source Go projects. The
-current test coverage is minimal and needs improvement. Although
-several PRs have identified issues, the lack of comprehensive testing
-makes it difficult to confidently ensure that new changes do not
-introduce regressions.
+To address this, I plan to strengthen the repository by introducing a regression test suite based on popular open-source Go projects. The current test coverage is minimal and needs improvement. Although several PRs have identified issues, the lack of comprehensive testing makes it difficult to confidently ensure that new changes do not introduce regressions.
 
-The goal of the regression suite is to lock in current behavior and
-enable more deliberate, explicit decisions when making changes. I also
-hope to extract simplified reproductions from identified issues, which
-should help improve long-term maintainability (AI has been especially
-helpful in this area).
+The goal of the regression suite is to lock in current behavior and enable more deliberate, explicit decisions when making changes. I also hope to extract simplified reproductions from identified issues, which should help improve long-term maintainability (AI has been especially helpful in this area).
 
-I don’t expect to spend much more time here, but I will be more
-intentional about stewardship now that others depend on it.
+I don’t expect to spend much more time here, but I will be more intentional about stewardship now that others depend on it.
 
-\[**2026-11-02**\]: [Helvethink](https://github.com/Helvethink) has taken
-over stewardship of the project and intends to maintain it actively. Because
-the project is used internally, Helvethink is committed to its long-term
-maintainability and will dedicate engineering time to fixes, reviews,
-regression coverage, and ongoing project upkeep.
+\[**2026-11-02**\]: [Helvethink](https://github.com/Helvethink) has taken over stewardship of the project and intends to maintain it actively. Because the project is used internally, Helvethink is committed to its long-term maintainability and will dedicate engineering time to fixes, reviews, regression coverage, and ongoing project upkeep.
 
 go tool cover XML (Cobertura) export
 ====================================
 
-This is a simple helper tool for generating XML output in [Cobertura](http://cobertura.sourceforge.net/) format
-for CIs like [Jenkins](https://wiki.jenkins-ci.org/display/JENKINS/Cobertura+Plugin) and others
-from [go tool cover](https://code.google.com/p/go.tools/) output.
+This is a simple helper tool for generating XML output in [Cobertura](http://cobertura.sourceforge.net/) format for CIs like [Jenkins](https://wiki.jenkins-ci.org/display/JENKINS/Cobertura+Plugin) and others from [go tool cover](https://code.google.com/p/go.tools/) output.
 
 Installation
 ------------
 
 Go 1.27 or newer is required to build and install the project.
 
-Until the first Helvethink release is tagged, install the maintained `main`
-branch:
+Until the first Helvethink release is tagged, install the maintained `main` branch:
 
-    $ go install github.com/Helvethink/go-cobertura@main
+```bash
+$ go install github.com/Helvethink/go-cobertura@main
+```
 
 After that release is available, prefer the latest tagged version:
 
-    $ go install github.com/Helvethink/go-cobertura@latest
+```bash
+$ go install github.com/Helvethink/go-cobertura@latest
+```
 
 Usage
 -----
 
 `go-cobertura` reads from the standard input:
 
-    $ go test -coverprofile=coverage.txt -covermode=count ./...
-    $ go-cobertura < coverage.txt > coverage.xml
+```bash
+$ go test -coverprofile=coverage.txt -covermode=count ./...
+$ go-cobertura < coverage.txt > coverage.xml
+```
 
 Note that you should run this from the directory which holds your `go.mod` file.
 
-**Windows note:** PowerShell does not support the `<` operator for stdin
-redirection.  Use piping instead:
+**Windows note:** PowerShell does not support the `<` operator for stdin redirection. Use piping instead:
 
-    Get-Content coverage.txt | go-cobertura > coverage.xml
+```powershell
+Get-Content coverage.txt | go-cobertura > coverage.xml
+```
 
-In `cmd.exe`, `<` works but may cause encoding issues with non-ASCII file
-paths.  The piping approach above avoids this problem on both shells.
-Cobertura package names and filenames are always emitted with forward slashes,
-including when the input profile uses Windows path separators.
+In `cmd.exe`, `<` works but may cause encoding issues with non-ASCII file paths. The piping approach above avoids this problem on both shells. Cobertura package names and filenames are always emitted with forward slashes, including when the input profile uses Windows path separators.
 
 ### Flags
 
@@ -87,15 +66,12 @@ Some flags can be passed (each flag should only be used once):
 
 - `-by-files`
 
-  Code coverage is organized by class by default.  This flag organizes code
-  coverage by the name of the file, which the same behavior as `go tool cover`.
+  Code coverage is organized by class by default. This flag organizes code coverage by the name of the file, which the same behavior as `go tool cover`.
 
 - `-ignore-dirs PATTERN`
 
-  ignore directories matching `PATTERN` regular expression. Full
-  directory names are matched, as
-  `github.com/Helvethink/go-cobertura` (and so `github.com/Helvethink`
-  and `github.com`), examples of use:
+  ignore directories matching `PATTERN` regular expression. Full directory names are matched, as `github.com/Helvethink/go-cobertura` (and so `github.com/Helvethink` and `github.com`), examples of use:
+  
   ```
   # A specific directory
   -ignore-dirs '^github\.com/Helvethink/go-cobertura/testdata$'
@@ -105,9 +81,8 @@ Some flags can be passed (each flag should only be used once):
 
 - `-ignore-files PATTERN`
 
-  ignore files matching `PATTERN` regular expression. Full file names
-  are matched, as `github.com/Helvethink/go-cobertura/profile.go`,
-  examples of use:
+  ignore files matching `PATTERN` regular expression. Full file names are matched, as `github.com/Helvethink/go-cobertura/profile.go`, examples of use:
+  
   ```
   # A specific file
   -ignore-files '^github\.com/Helvethink/go-cobertura/profile\.go$'
@@ -119,130 +94,90 @@ Some flags can be passed (each flag should only be used once):
 
 - `-ignore-gen-files`
 
-  ignore files that follow Go's
-  [generated-code convention](https://go.dev/s/generatedcode): a canonical
-  `// Code generated ... DO NOT EDIT.` comment before the package clause.
+  ignore files that follow Go's [generated-code convention](https://go.dev/s/generatedcode): a canonical `// Code generated ... DO NOT EDIT.` comment before the package clause.
 
 - `-ignore-non-code-lines`
 
-  ignore lines with no code. The coverage report generated by
-  `go tool cover` includes some lines with no code. This flag
-  strips lines with no code from coverage data.
+  ignore lines with no code. The coverage report generated by `go tool cover` includes some lines with no code. This flag strips lines with no code from coverage data.
 
 - `-path DIR`
 
-  set the project directory for package resolution.  By default,
-  `go-cobertura` resolves packages relative to the current working
-  directory.  Use this flag when running from a different directory than
-  the module root, for example in monorepos with nested modules:
+  set the project directory for package resolution. By default, `go-cobertura` resolves packages relative to the current working directory. Use this flag when running from a different directory than the module root, for example in monorepos with nested modules:
 
       go-cobertura -path /repo/services/api < coverage.txt > coverage.xml
 
 - `-strict`
 
-  exit with an error if any profiles are skipped due to missing package
-  or module information, or if `packages.Load` reports package-resolution
-  diagnostics. By default, these conditions produce warnings on stderr but
-  the tool exits successfully and retains any profiles that can still be
-  resolved. In strict mode, validation failures leave standard output empty,
-  so a partial Cobertura report cannot be published. Use this flag in CI
-  pipelines to catch incomplete coverage data:
+  exit with an error if any profiles are skipped due to missing package or module information, or if `packages.Load` reports package-resolution diagnostics. By default, these conditions produce warnings on stderr but the tool exits successfully and retains any profiles that can still be resolved. In strict mode, validation failures leave standard output empty, so a partial Cobertura report cannot be published. Use this flag in CI pipelines to catch incomplete coverage data:
 
       go-cobertura -strict < coverage.txt > coverage.xml
 
 ### Build tags
 
-If your tests use [build tags](https://pkg.go.dev/cmd/go#hdr-Build_constraints),
-you must pass the same tags when running `go-cobertura`.  The tool uses
-[`packages.Load`](https://pkg.go.dev/golang.org/x/tools/go/packages#Load) to
-resolve source files, and it needs matching tags to find the right files.
+If your tests use [build tags](https://pkg.go.dev/cmd/go#hdr-Build_constraints), you must pass the same tags when running `go-cobertura`. The tool uses [`packages.Load`](https://pkg.go.dev/golang.org/x/tools/go/packages#Load) to resolve source files, and it needs matching tags to find the right files.
 
-Pass tags via the
-[`GOFLAGS`](https://pkg.go.dev/cmd/go#hdr-Environment_variables) environment
-variable:
+Pass tags via the [`GOFLAGS`](https://pkg.go.dev/cmd/go#hdr-Environment_variables) environment variable:
 
-    # Single tag
-    GOFLAGS="-tags=integration" go-cobertura < coverage.txt > coverage.xml
+```bash
+# Single tag
+GOFLAGS="-tags=integration" go-cobertura < coverage.txt > coverage.xml
 
-    # Multiple tags
-    GOFLAGS="-tags=integration,e2e" go-cobertura < coverage.txt > coverage.xml
+# Multiple tags
+GOFLAGS="-tags=integration,e2e" go-cobertura < coverage.txt > coverage.xml
+```
 
 On Windows (PowerShell):
 
-    $env:GOFLAGS="-tags=integration"; go-cobertura < coverage.txt > coverage.xml
+```powershell
+$env:GOFLAGS="-tags=integration"; go-cobertura < coverage.txt > coverage.xml
+```
 
-**Why is this needed?**  When you run `go test -tags=integration -coverprofile=coverage.txt`,
-the coverage profile includes files that are only compiled with that tag (e.g. files
-with `//go:build integration`).  Without the matching tag, `go-cobertura` cannot
-locate those files and will skip them with a warning on stderr.
+**Why is this needed?** When you run `go test -tags=integration -coverprofile=coverage.txt`, the coverage profile includes files that are only compiled with that tag (e.g. files with `//go:build integration`). Without the matching tag, `go-cobertura` cannot locate those files and will skip them with a warning on stderr.
 
 Troubleshooting
 ---------------
 
 ### Warning: package load diagnostic
 
-`go-cobertura` reports diagnostics returned by `packages.Load`, including the
-affected package and the underlying Go tool error. Typical causes include an
-unresolved import, an incomplete module checkout, or missing credentials for a
-private dependency. The profile is retained when its package and source files
-remain usable; otherwise a separate `skipping profile` warning is emitted.
-Use `-strict` in CI to turn any package-load diagnostic into a conversion
-error.
+`go-cobertura` reports diagnostics returned by `packages.Load`, including the affected package and the underlying Go tool error. Typical causes include an unresolved import, an incomplete module checkout, or missing credentials for a private dependency. The profile is retained when its package and source files remain usable; otherwise a separate `skipping profile` warning is emitted. Use `-strict` in CI to turn any package-load diagnostic into a conversion error.
 
 ### Warning: skipping profile — no package/module information available
 
-This warning means `go-cobertura` could not resolve a package from the
-coverage profile.  Common causes:
+This warning means `go-cobertura` could not resolve a package from the coverage profile. Common causes:
 
 - **Missing build tags** — see [Build tags](#build-tags) above.
-- **Wrong working directory** — run from the directory containing `go.mod`,
-  or use the `-path` flag.
-- **Standard library packages** — coverage profiles occasionally include
-  stdlib packages, which have no module info.  These are safely skipped.
+- **Wrong working directory** — run from the directory containing `go.mod`, or use the `-path` flag.
+- **Standard library packages** — coverage profiles occasionally include stdlib packages, which have no module info. These are safely skipped.
 
 ### Warning: skipping profile — unable to determine file path
 
-The package was resolved but a specific source file was not found.  This
-typically happens when the coverage profile was generated on a different
-platform (e.g. `_windows.go` files in a profile generated on Windows, but
-the converter is running on Linux).  These files are safely skipped.
+The package was resolved but a specific source file was not found. This typically happens when the coverage profile was generated on a different platform (e.g. `_windows.go` files in a profile generated on Windows, but the converter is running on Linux). These files are safely skipped.
 
 ### Branch coverage is always 0
 
-The Cobertura format supports branch coverage (`branch-rate`, `branch="true"`
-on lines), but `go-cobertura` always reports `branch-rate="0"`.
+The Cobertura format supports branch coverage (`branch-rate`, `branch="true"` on lines), but `go-cobertura` always reports `branch-rate="0"`.
 
-Go's [coverage instrumentation](https://go.dev/blog/cover) tracks which
-statement blocks were executed, not which branch paths were taken.  While
-branch points (if/else, switch) can sometimes be *inferred* from block
-boundaries, Go does not produce enough structural information to reliably
-count the number of branch arms at a decision point.  Reporting inaccurate
-branch coverage would be worse than reporting none, so this tool leaves
-branch-rate at 0.
+Go's [coverage instrumentation](https://go.dev/blog/cover) tracks which statement blocks were executed, not which branch paths were taken. While branch points (if/else, switch) can sometimes be *inferred* from block boundaries, Go does not produce enough structural information to reliably count the number of branch arms at a decision point. Reporting inaccurate branch coverage would be worse than reporting none, so this tool leaves branch-rate at 0.
 
 Regression Tests
 ----------------
 
-A snapshot-based regression test suite verifies that conversion output remains
-stable across code changes.  The suite converts real coverage profiles from
-open-source Go projects and compares the XML output against checked-in golden
-files.  Each regression fixture validates the default output against
-`golden.xml` and the `-ignore-non-code-lines` output against
-`golden-ignore-non-code-lines.xml`.
+A snapshot-based regression test suite verifies that conversion output remains stable across code changes. The suite converts real coverage profiles from open-source Go projects and compares the XML output against checked-in golden files. Each regression fixture validates the default output against `golden.xml` and the `-ignore-non-code-lines` output against `golden-ignore-non-code-lines.xml`.
 
 **Running regression tests** (Linux only):
 
-    go test -tags regression -run TestRegression -v -timeout 600s
+```bash
+go test -tags regression -run TestRegression -v -timeout 600s
+```
 
 **Updating golden files** after intentional changes:
 
-    go test -tags regression -run TestRegression -update -v -timeout 600s
-    git diff testdata/regression/  # review the changes
+```bash
+go test -tags regression -run TestRegression -update -v -timeout 600s
+git diff testdata/regression/  # review the changes
+```
 
-**Platform note:** Golden files are generated on Linux.  The regression tests
-are skipped on non-Linux platforms because coverage profiles may reference
-platform-specific source files (e.g. `_windows.go`) that are unavailable on
-other operating systems.  To regenerate golden files on Windows, use WSL.
+**Platform note:** Golden files are generated on Linux. The regression tests are skipped on non-Linux platforms because coverage profiles may reference platform-specific source files (e.g. `_windows.go`) that are unavailable on other operating systems. To regenerate golden files on Windows, use WSL.
 
 **Current corpus:**
 
@@ -264,9 +199,9 @@ other operating systems.  To regenerate golden files on Windows, use WSL.
 Thanks
 ------
 
- * [Yukinari Toyota (t-yuki)](https://github.com/t-yuki)
- * [Christopher Boumenot (boumenot)](https://github.com/boumenot)
- * This tool is originated from [gocov-xml](https://github.com/AlekSi/gocov-xml) by [Alexey Palazhchenko (AlekSi)](https://github.com/AlekSi)
- * [DarcySail](https://github.com/DarcySail)'s [PR](https://github.com/t-yuki/gocover-cobertura/pull/22)
- * [maxatome](https://github.com/maxatome)'s [PR](https://github.com/t-yuki/gocover-cobertura/pull/19)
- * [elliotmr](https://github.com/elliotmr)'s [branch](https://github.com/elliotmr/gocover-cobertura)
+* [Yukinari Toyota (t-yuki)](https://github.com/t-yuki)
+* [Christopher Boumenot (boumenot)](https://github.com/boumenot)
+* This tool is originated from [gocov-xml](https://github.com/AlekSi/gocov-xml) by [Alexey Palazhchenko (AlekSi)](https://github.com/AlekSi)
+* [DarcySail](https://github.com/DarcySail)'s [PR](https://github.com/t-yuki/gocover-cobertura/pull/22)
+* [maxatome](https://github.com/maxatome)'s [PR](https://github.com/t-yuki/gocover-cobertura/pull/19)
+* [elliotmr](https://github.com/elliotmr)'s [branch](https://github.com/elliotmr/gocover-cobertura)
