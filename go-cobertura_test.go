@@ -73,6 +73,63 @@ func TestRunHelpSucceeds(t *testing.T) {
 	require.Contains(t, stderr.String(), "Usage of go-cobertura")
 }
 
+func TestRunAcceptsEmptyInput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(nil, strings.NewReader(""), &stdout, &stderr)
+
+	require.Zero(t, exitCode)
+	require.Contains(t, stdout.String(), "<coverage")
+	require.Empty(t, stderr.String())
+}
+
+func TestRunRejectsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		input      string
+		wantStderr string
+	}{
+		{
+			name:       "unknown flag",
+			args:       []string{"-unknown"},
+			input:      "mode: set",
+			wantStderr: "flag provided but not defined",
+		},
+		{
+			name:       "malformed coverage",
+			input:      "invalid data",
+			wantStderr: "code coverage conversion failed: bad mode line",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			exitCode := run(test.args, strings.NewReader(test.input), &stdout, &stderr)
+
+			require.Equal(t, 1, exitCode)
+			require.Empty(t, stdout.String())
+			require.Contains(t, stderr.String(), test.wantStderr)
+		})
+	}
+}
+
+func TestRunReportsOutputWriterFailure(t *testing.T) {
+	stdout := &failOnceWriter{shouldFail: func([]byte) bool { return true }}
+	var stderr bytes.Buffer
+
+	exitCode := run(nil, strings.NewReader("mode: set"), stdout, &stderr)
+
+	require.Equal(t, 1, exitCode)
+	require.True(t, stdout.failed)
+	require.Contains(t, stderr.String(), "code coverage conversion failed: writing xml header")
+	require.Contains(t, stderr.String(), errTestWrite.Error())
+}
+
 func TestConvertParseProfilesError(t *testing.T) {
 	var output bytes.Buffer
 	err := convert(strings.NewReader("invalid data"), &output, io.Discard, conversionOptions{})

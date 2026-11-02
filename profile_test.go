@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,6 +100,64 @@ func TestParseProfilesInvalidInput(t *testing.T) {
 	}
 }
 
+func TestParseProfilesEmptyInput(t *testing.T) {
+	profiles, err := ParseProfiles(strings.NewReader(""), &Ignore{})
+
+	require.NoError(t, err)
+	require.Empty(t, profiles)
+}
+
+func TestParseProfilesRejectsOverflowInNumericFields(t *testing.T) {
+	const overflow = "999999999999999999999999"
+	tests := []struct {
+		name      string
+		profile   string
+		errorText string
+	}{
+		{name: "start line", profile: overflow + ".2,3.4 1 5", errorText: "invalid start line"},
+		{name: "start column", profile: "1." + overflow + ",3.4 1 5", errorText: "invalid start column"},
+		{name: "end line", profile: "1.2," + overflow + ".4 1 5", errorText: "invalid end line"},
+		{name: "end column", profile: "1.2,3." + overflow + " 1 5", errorText: "invalid end column"},
+		{name: "statement count", profile: "1.2,3.4 " + overflow + " 5", errorText: "invalid statement count"},
+		{name: "hit count", profile: "1.2,3.4 1 " + overflow, errorText: "invalid hit count"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := "mode: count\nexample.com/project/file.go:" + test.profile + "\n"
+			profiles, err := ParseProfiles(strings.NewReader(input), &Ignore{})
+
+			require.ErrorContains(t, err, test.errorText)
+			require.Nil(t, profiles)
+		})
+	}
+}
+
+func TestParseProfilesRejectsLongLine(t *testing.T) {
+	input := "mode: set\n" + strings.Repeat("x", 128*1024) + "\n"
+
+	profiles, err := ParseProfiles(strings.NewReader(input), &Ignore{})
+
+	require.Error(t, err)
+	require.Nil(t, profiles)
+}
+
+func TestParseProfilesPreservesDuplicateBlocks(t *testing.T) {
+	const input = `mode: count
+example.com/project/file.go:1.2,3.4 1 5
+example.com/project/file.go:1.2,3.4 1 7
+`
+
+	profiles, err := ParseProfiles(strings.NewReader(input), &Ignore{})
+
+	require.NoError(t, err)
+	require.Len(t, profiles, 1)
+	require.Equal(t, []ProfileBlock{
+		{StartLine: 1, StartCol: 2, EndLine: 3, EndCol: 4, NumStmt: 1, Count: 5},
+		{StartLine: 1, StartCol: 2, EndLine: 3, EndCol: 4, NumStmt: 1, Count: 7},
+	}, profiles[0].Blocks)
+}
+
 func TestParseProfilesValidatesIgnoredLines(t *testing.T) {
 	input := "mode: set\nexample.com/project/file.go:999999999999999999999999.2,3.4 1 5\n"
 	ignore := &Ignore{Files: regexp.MustCompile(`file\.go$`)}
@@ -126,4 +185,24 @@ func TestParseProfilesRegressionFixtures(t *testing.T) {
 			require.NotEmpty(t, profiles)
 		})
 	}
+}
+
+func FuzzParseProfiles(f *testing.F) {
+	seeds := [][]byte{
+		{},
+		[]byte("mode: set\n"),
+		[]byte("mode: atomic\r\nexample.com/project/file.go:1.2,3.4 1 5\r\n"),
+		[]byte("mode: count\nexample.com/project/file.go:1.2,3.4 1 5\n"),
+		[]byte("invalid data"),
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, input []byte) {
+		profiles, err := ParseProfiles(bytes.NewReader(input), &Ignore{})
+		if err != nil && profiles != nil {
+			t.Fatalf("ParseProfiles returned profiles with an error: %v", err)
+		}
+	})
 }
