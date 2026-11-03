@@ -1,4 +1,4 @@
-package main
+package coverage
 
 import (
 	"bytes"
@@ -168,7 +168,7 @@ func TestParseProfilesValidatesIgnoredLines(t *testing.T) {
 }
 
 func TestParseProfilesRegressionFixtures(t *testing.T) {
-	files, err := filepath.Glob("testdata/regression/*/*/coverage.txt")
+	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "regression", "*", "*", "coverage.txt"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 

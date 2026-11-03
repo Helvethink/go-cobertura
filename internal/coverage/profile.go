@@ -4,7 +4,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package coverage
 
 import (
 	"bufio"
@@ -74,7 +74,7 @@ func ParseProfiles(in io.Reader, ignore *Ignore) ([]*Profile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bad profile line %d: %w", lineNumber, err)
 		}
-		fn := normalizeImportPath(m[1])
+		fn := NormalizeImportPath(m[1])
 		if ignore.Match(fn, nil) {
 			continue
 		}
@@ -105,7 +105,8 @@ func ParseProfiles(in io.Reader, ignore *Ignore) ([]*Profile, error) {
 	return profiles, nil
 }
 
-func normalizeImportPath(value string) string {
+// NormalizeImportPath converts platform-specific separators to import-path separators.
+func NormalizeImportPath(value string) string {
 	return strings.ReplaceAll(value, `\`, "/")
 }
 

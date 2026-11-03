@@ -1,10 +1,8 @@
-package main
+package cobertura
 
 import (
 	"bytes"
 	"encoding/xml"
-	"errors"
-	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,74 +11,30 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	coverprofile "github.com/Helvethink/go-cobertura/internal/coverage"
 	"golang.org/x/tools/go/packages"
 )
 
 const coberturaDTDDecl = `<!DOCTYPE coverage SYSTEM "http://cobertura.sourceforge.net/xml/coverage-04.dtd">`
 
-type conversionOptions struct {
-	ignore     Ignore
-	byFiles    bool
-	projectDir string
-	strict     bool
+type Options struct {
+	Ignore     coverprofile.Ignore
+	ByFiles    bool
+	ProjectDir string
 }
 
-func main() {
-	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+type conversionOptions = Options
+
+func Convert(in io.Reader, out, warnings io.Writer, options Options) error {
+	return convert(in, out, warnings, options)
 }
 
-func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	options := conversionOptions{}
-	flags := flag.NewFlagSet("go-cobertura", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-
-	flags.BoolVar(&options.byFiles, "by-files", false, "code coverage by file, not class")
-	flags.BoolVar(&options.ignore.GeneratedFiles, "ignore-gen-files", false, "ignore generated files")
-	flags.BoolVar(&options.ignore.NonCodeLines, "ignore-non-code-lines", false, "ignore lines with no code")
-	flags.BoolVar(&options.strict, "strict", false, "exit with error if any profiles are skipped")
-	flags.StringVar(&options.projectDir, "path", "", "set the project directory for package resolution")
-	ignoreDirsRe := flags.String("ignore-dirs", "", "ignore dirs matching this regexp")
-	ignoreFilesRe := flags.String("ignore-files", "", "ignore files matching this regexp")
-
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 1
-	}
-
-	var err error
-	if *ignoreDirsRe != "" {
-		options.ignore.Dirs, err = regexp.Compile(*ignoreDirsRe)
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "Bad -ignore-dirs regexp: %s\n", err)
-			return 1
-		}
-	}
-
-	if *ignoreFilesRe != "" {
-		options.ignore.Files, err = regexp.Compile(*ignoreFilesRe)
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "Bad -ignore-files regexp: %s\n", err)
-			return 1
-		}
-	}
-
-	if options.strict {
-		err = convertStrict(stdin, stdout, options)
-	} else {
-		err = convert(stdin, stdout, stderr, options)
-	}
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "code coverage conversion failed: %s\n", err)
-		return 1
-	}
-	return 0
+func ConvertStrict(in io.Reader, out io.Writer, options Options) error {
+	return convertStrict(in, out, options)
 }
 
 func convert(in io.Reader, out, warnings io.Writer, options conversionOptions) error {
@@ -132,12 +86,12 @@ type conversionResult struct {
 
 func convertInternal(in io.Reader, out, warnings io.Writer, options conversionOptions) (conversionResult, error) {
 	result := conversionResult{}
-	profiles, err := ParseProfiles(in, &options.ignore)
+	profiles, err := coverprofile.ParseProfiles(in, &options.Ignore)
 	if err != nil {
 		return result, err
 	}
 
-	pkgs, diagnostics, err := getPackages(profiles, options.projectDir)
+	pkgs, diagnostics, err := getPackages(profiles, options.ProjectDir)
 	if err != nil {
 		return result, err
 	}
@@ -186,7 +140,7 @@ func convertInternal(in io.Reader, out, warnings io.Writer, options conversionOp
 	return result, nil
 }
 
-func getPackages(profiles []*Profile, dir string) ([]*packages.Package, []packageLoadDiagnostic, error) {
+func getPackages(profiles []*coverprofile.Profile, dir string) ([]*packages.Package, []packageLoadDiagnostic, error) {
 	if len(profiles) == 0 {
 		return []*packages.Package{}, nil, nil
 	}
@@ -257,7 +211,7 @@ func appendIfUnique(sources []*Source, dir string) []*Source {
 }
 
 func getPackageName(filename string) string {
-	pkgName, _ := path.Split(normalizeImportPath(filename))
+	pkgName, _ := path.Split(coverprofile.NormalizeImportPath(filename))
 	return strings.TrimSuffix(pkgName, "/")
 }
 
@@ -298,7 +252,7 @@ func readSourceFile(pkg *packages.Package, profileName, fileName string) (string
 }
 
 func (cov *Coverage) parseProfiles(
-	profiles []*Profile,
+	profiles []*coverprofile.Profile,
 	pkgMap map[string]*packages.Package,
 	packageDiagnostics map[string]bool,
 	warnings io.Writer,
@@ -340,12 +294,12 @@ func (cov *Coverage) parseProfiles(
 	return skipped, nil
 }
 
-func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, options conversionOptions) (bool, error) {
+func (cov *Coverage) parseProfile(profile *coverprofile.Profile, pkgPkg *packages.Package, options conversionOptions) (bool, error) {
 	if pkgPkg == nil || pkgPkg.Module == nil {
 		return true, nil
 	}
-	profileName := normalizeImportPath(profile.FileName)
-	modulePath := strings.TrimSuffix(normalizeImportPath(pkgPkg.Module.Path), "/")
+	profileName := coverprofile.NormalizeImportPath(profile.FileName)
+	modulePath := strings.TrimSuffix(coverprofile.NormalizeImportPath(pkgPkg.Module.Path), "/")
 	if modulePath == "" {
 		return false, fmt.Errorf("unable to resolve profile %q: module path is empty", profile.FileName)
 	}
@@ -364,7 +318,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, op
 		return false, err
 	}
 
-	if options.ignore.Match(fileName, data) {
+	if options.Ignore.Match(fileName, data) {
 		return false, nil
 	}
 
@@ -390,7 +344,7 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, op
 		fset:       fset,
 		validLines: make(map[int]bool),
 	}
-	if options.ignore.NonCodeLines {
+	if options.Ignore.NonCodeLines {
 		ast.Walk(validVisitor, parsed)
 	}
 
@@ -402,8 +356,8 @@ func (cov *Coverage) parseProfile(profile *Profile, pkgPkg *packages.Package, op
 		pkg:                pkg,
 		profile:            profile,
 		validLines:         validVisitor.validLines,
-		ignoreNonCodeLines: options.ignore.NonCodeLines,
-		byFiles:            options.byFiles,
+		ignoreNonCodeLines: options.Ignore.NonCodeLines,
+		byFiles:            options.ByFiles,
 	}
 	ast.Walk(visitor, parsed)
 	pkg.LineRate = pkg.HitRate()
@@ -429,7 +383,7 @@ type fileVisitor struct {
 	fileData           []byte
 	pkg                *Package
 	classes            map[string]*Class
-	profile            *Profile
+	profile            *coverprofile.Profile
 	validLines         map[int]bool
 	ignoreNonCodeLines bool
 	byFiles            bool

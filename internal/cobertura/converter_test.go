@@ -1,4 +1,4 @@
-package main
+package cobertura
 
 import (
 	"bytes"
@@ -6,129 +6,20 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 
+	coverprofile "github.com/Helvethink/go-cobertura/internal/coverage"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/go/packages"
 )
 
-func TestMainOutput(t *testing.T) {
-	if os.Getenv("GO_COBERTURA_TEST_MAIN") == "1" {
-		os.Exit(run(nil, os.Stdin, os.Stdout, os.Stderr))
-	}
-
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestMainOutput$")
-	cmd.Env = append(os.Environ(), "GO_COBERTURA_TEST_MAIN=1")
-	cmd.Stdin = strings.NewReader("mode: set")
-	output, err := cmd.Output()
-	require.NoError(t, err)
-	require.Contains(t, string(output), xml.Header)
-	require.Contains(t, string(output), coberturaDTDDecl)
-}
-
-func TestRunDoesNotRetainOptions(t *testing.T) {
-	input, err := os.ReadFile("testdata/testdata_set.txt")
-	require.NoError(t, err)
-
-	var byFilesOutput bytes.Buffer
-	require.Zero(t, run(
-		[]string{"-by-files"},
-		bytes.NewReader(input),
-		&byFilesOutput,
-		io.Discard,
-	))
-	require.Contains(t, byFilesOutput.String(), `name="testdata.func1.go"`)
-
-	var defaultOutput bytes.Buffer
-	require.Zero(t, run(nil, bytes.NewReader(input), &defaultOutput, io.Discard))
-	require.Contains(t, defaultOutput.String(), `name="-"`)
-	require.NotContains(t, defaultOutput.String(), `name="testdata.func1.go"`)
-}
-
-func TestRunRejectsInvalidIgnorePattern(t *testing.T) {
-	var stderr bytes.Buffer
-
-	exitCode := run(
-		[]string{"-ignore-files", "["},
-		strings.NewReader("mode: set"),
-		io.Discard,
-		&stderr,
-	)
-
-	require.Equal(t, 1, exitCode)
-	require.Contains(t, stderr.String(), "Bad -ignore-files regexp")
-}
-
-func TestRunHelpSucceeds(t *testing.T) {
-	var stderr bytes.Buffer
-
-	exitCode := run([]string{"-help"}, strings.NewReader("mode: set"), io.Discard, &stderr)
-
-	require.Zero(t, exitCode)
-	require.Contains(t, stderr.String(), "Usage of go-cobertura")
-}
-
-func TestRunAcceptsEmptyInput(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	exitCode := run(nil, strings.NewReader(""), &stdout, &stderr)
-
-	require.Zero(t, exitCode)
-	require.Contains(t, stdout.String(), "<coverage")
-	require.Empty(t, stderr.String())
-}
-
-func TestRunRejectsInvalidInput(t *testing.T) {
-	tests := []struct {
-		name       string
-		args       []string
-		input      string
-		wantStderr string
-	}{
-		{
-			name:       "unknown flag",
-			args:       []string{"-unknown"},
-			input:      "mode: set",
-			wantStderr: "flag provided but not defined",
-		},
-		{
-			name:       "malformed coverage",
-			input:      "invalid data",
-			wantStderr: "code coverage conversion failed: bad mode line",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			var stdout bytes.Buffer
-			var stderr bytes.Buffer
-
-			exitCode := run(test.args, strings.NewReader(test.input), &stdout, &stderr)
-
-			require.Equal(t, 1, exitCode)
-			require.Empty(t, stdout.String())
-			require.Contains(t, stderr.String(), test.wantStderr)
-		})
-	}
-}
-
-func TestRunReportsOutputWriterFailure(t *testing.T) {
-	stdout := &failOnceWriter{shouldFail: func([]byte) bool { return true }}
-	var stderr bytes.Buffer
-
-	exitCode := run(nil, strings.NewReader("mode: set"), stdout, &stderr)
-
-	require.Equal(t, 1, exitCode)
-	require.True(t, stdout.failed)
-	require.Contains(t, stderr.String(), "code coverage conversion failed: writing xml header")
-	require.Contains(t, stderr.String(), errTestWrite.Error())
-}
+type Ignore = coverprofile.Ignore
+type Profile = coverprofile.Profile
+type ProfileBlock = coverprofile.ProfileBlock
 
 func TestConvertParseProfilesError(t *testing.T) {
 	var output bytes.Buffer
@@ -139,15 +30,26 @@ func TestConvertParseProfilesError(t *testing.T) {
 
 func convertFixture(t *testing.T, filename string, ignore *Ignore) Coverage {
 	t.Helper()
-	return convertFixtureWithOptions(t, filename, conversionOptions{ignore: *ignore})
+	return convertFixtureWithOptions(t, filename, conversionOptions{Ignore: *ignore})
 }
 
 func convertFixtureWithOptions(t *testing.T, filename string, options conversionOptions) Coverage {
 	t.Helper()
 
-	data, err := os.ReadFile(filename)
+	root := repositoryRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(filename)))
 	require.NoError(t, err)
+	if options.ProjectDir == "" {
+		options.ProjectDir = root
+	}
 	return convertAndDecode(t, bytes.NewReader(data), options)
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	return root
 }
 
 func convertAndDecode(t *testing.T, input io.Reader, options conversionOptions) Coverage {
@@ -313,7 +215,7 @@ func TestParseProfileModulePaths(t *testing.T) {
 			profile := Profile{FileName: test.profileName}
 			pkg := packages.Package{
 				ID:      getPackageName(test.profileName),
-				GoFiles: []string{"testdata/func1.go"},
+				GoFiles: []string{filepath.Join(repositoryRoot(t), "testdata", "func1.go")},
 				Module: &packages.Module{
 					Path: test.modulePath,
 				},
@@ -546,8 +448,8 @@ func TestConvertSetMode(t *testing.T) {
 // the receiver type name.
 func TestConvertByFilesMode(t *testing.T) {
 	v := convertFixtureWithOptions(t, "testdata/testdata_set.txt", conversionOptions{
-		byFiles: true,
-		ignore: Ignore{
+		ByFiles: true,
+		Ignore: Ignore{
 			GeneratedFiles: true,
 			Files:          regexp.MustCompile(`[\\/]func[45]\.go$`),
 		},
@@ -913,8 +815,7 @@ func TestConvertShortAssignNotDoubleCounted(t *testing.T) {
 // Inspired by: https://github.com/boumenot/gocover-cobertura/pull/23
 func TestConvertWithProjectDir(t *testing.T) {
 	// Get the absolute path to the repo root.
-	absRoot, err := filepath.Abs(".")
-	require.NoError(t, err)
+	absRoot := repositoryRoot(t)
 
 	// Read testdata from the absolute path.
 	data, err := os.ReadFile(filepath.Join(absRoot, "testdata", "testdata_set.txt"))
@@ -923,7 +824,7 @@ func TestConvertWithProjectDir(t *testing.T) {
 	// With an unrelated projectDir, convert produces empty output because
 	// packages.Load cannot resolve the testdata packages from there.
 	var bufEmpty bytes.Buffer
-	err = convert(bytes.NewReader(data), &bufEmpty, io.Discard, conversionOptions{projectDir: t.TempDir()})
+	err = convert(bytes.NewReader(data), &bufEmpty, io.Discard, conversionOptions{ProjectDir: t.TempDir()})
 	require.NoError(t, err)
 	require.NotContains(t, bufEmpty.String(), "line-rate=\"0.1",
 		"with an unrelated -path, coverage data should be missing from output")
@@ -931,7 +832,7 @@ func TestConvertWithProjectDir(t *testing.T) {
 	// With projectDir pointing to the repo root, convert should produce actual
 	// coverage data without changing the process working directory.
 	var buf bytes.Buffer
-	err = convert(bytes.NewReader(data), &buf, io.Discard, conversionOptions{projectDir: absRoot})
+	err = convert(bytes.NewReader(data), &buf, io.Discard, conversionOptions{ProjectDir: absRoot})
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "line-rate=\"0.1",
 		"with -path, coverage data should be present in output")
@@ -963,7 +864,7 @@ func TestConvertStrictModeReturnsErrorOnSkippedProfiles(t *testing.T) {
 // TestConvertStrictModePassesWhenNoSkips verifies that strict mode does
 // not error when all profiles are resolved successfully.
 func TestConvertStrictModePassesWhenNoSkips(t *testing.T) {
-	pipe1rd, err := os.Open("testdata/testdata_set.txt")
+	pipe1rd, err := os.Open(filepath.Join(repositoryRoot(t), "testdata", "testdata_set.txt"))
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -1039,7 +940,7 @@ replace private.example.com/team/dependency => ./missing-private-dependency
 
 			var output bytes.Buffer
 			var warnings bytes.Buffer
-			options := conversionOptions{projectDir: dir}
+			options := conversionOptions{ProjectDir: dir}
 			err := convert(strings.NewReader(input), &output, &warnings, options)
 			require.NoError(t, err)
 			require.Contains(t, warnings.String(), test.wantWarning)
