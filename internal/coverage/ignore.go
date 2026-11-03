@@ -1,4 +1,4 @@
-package main
+package coverage
 
 import (
 	"go/ast"
@@ -17,7 +17,7 @@ type Ignore struct {
 }
 
 func (i *Ignore) Match(fileName string, data []byte) (ret bool) {
-	fileName = normalizeImportPath(fileName)
+	fileName = NormalizeImportPath(fileName)
 
 	if i.cache == nil {
 		i.cache = map[string]bool{}
